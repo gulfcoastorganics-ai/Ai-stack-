@@ -14,7 +14,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { Vector3, Color3, Color4 } from "@babylonjs/core/Maths/math";
 
 import { registerShaders } from "./shaders/registry.js";
-import { S, onChange } from "./core/settings.js";
+import { S, onChange, PRESET_ORDER, applyPreset } from "./core/settings.js";
 import {
     sample, checkSpike, stats, mark, installDrawCounter, endFrameDraws,
 } from "./core/perf.js";
@@ -54,6 +54,13 @@ async function boot() {
         powerPreference: "high-performance",
         enableAllFeatures: true,
         setMaximumLimits: true,
+        // Phase 8A: without this the render target matched the canvas's CSS
+        // size, not the device's actual pixel grid — on any HiDPI display the
+        // browser was then upscaling an already-rendered image, which is
+        // most of why item 15's screenshot still looked soft at a fixed
+        // window size. `resolutionScale` (see `settings.js`) still applies on
+        // top of this as the user- and preset-controlled multiplier.
+        adaptToDeviceRatio: true,
     });
 
     try {
@@ -204,6 +211,16 @@ async function boot() {
     let prev = performance.now();
     let time = 0;
 
+    // Phase 8A, item 17: "consider defaulting runtime selection based on
+    // initial frame-time sampling". One-shot, deliberately simple — this is
+    // not a continuous quality-of-service loop, just a single correction a
+    // couple of seconds in, so `ultra` never silently sits at 25 fps on
+    // hardware that can't carry it. Only fires if the player hasn't already
+    // touched the quality preset (an explicit choice always wins), and it
+    // only ever steps down one tier — enough to recover from a genuinely
+    // bad first impression without guessing how far to fall.
+    let autoQualityChecked = false;
+
     engine.runRenderLoop(() => {
         const now = performance.now();
         let dtMs = now - prev;
@@ -287,6 +304,18 @@ async function boot() {
         sample(dtMs);
         checkSpike(dtMs);
         overlay.update(dtMs, engine);
+
+        // A couple of seconds gives the median (see `perf.js`) time to settle
+        // past pipeline warm-up hitches. 22 ms ≈ 45 fps — below that the
+        // default is doing more harm than the screenshot-quality `ultra`
+        // preset is worth.
+        if (!autoQualityChecked && time > 2.2) {
+            autoQualityChecked = true;
+            if (S.preset === "ultra" && stats.median > 22) {
+                const idx = PRESET_ORDER.indexOf("ultra");
+                if (idx > 0) applyPreset(PRESET_ORDER[idx - 1]);
+            }
+        }
 
         endFrame();
     });

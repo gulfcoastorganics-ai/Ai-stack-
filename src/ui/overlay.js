@@ -213,7 +213,7 @@ export class Overlay {
         pr.className = "presets";
         el.appendChild(pr);
         this.presetBtns = {};
-        for (const name of ["ultra", "high", "balanced"]) {
+        for (const name of ["ultra", "high", "medium", "low"]) {
             const b = document.createElement("button");
             b.textContent = name;
             b.onclick = () => {

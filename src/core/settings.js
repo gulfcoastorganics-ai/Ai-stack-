@@ -16,20 +16,35 @@ export const S = {
 
     // ------------------------------------------------------------------- sun
     sunAzimuth: 118, // degrees, compass bearing of the sun
-    // Low enough for long raking shadows, high enough that the beam still
-    // carries real energy — below ~10 degrees the air mass eats so much of it
-    // that the scene goes flat and sky-lit.
-    sunElevation: 13.0,
-    sunIntensity: 4.2,
+    // Phase 8A beauty pass: dropped further toward the grazing end of the
+    // range for a more dramatic late-afternoon read — longer shadows, harder
+    // crest/lee separation. Still well clear of the point where the air mass
+    // eats all the energy and the scene goes flat.
+    sunElevation: 10.5,
+    // Raised alongside a lower ambient (below): the previous 4.2/1.0 balance
+    // put nearly as much light into the scene from the sky dome as from the
+    // sun itself, which is exactly the "evenly illuminated, no dune reads
+    // through lighting" complaint. A stronger sun against a dimmer fill is
+    // what makes windward faces bright and lee faces read as genuinely dark.
+    sunIntensity: 5.6,
     sunTempWarm: 1.0, // 0 = neutral white, 1 = full warm low-sun tint
-    ambientIntensity: 1.0,
-    ambientBlue: 1.0, // strength of the cool shadow shift
+    // Was 1.0 — enough ambient fill that shadows and lit faces sat within a
+    // stop of each other. Cut to let the sun/shadow split actually show.
+    ambientIntensity: 0.68,
+    ambientBlue: 0.85, // strength of the cool shadow shift — trimmed slightly with it
 
     // ------------------------------------------------------------- atmosphere
-    fogDensity: 0.0072,
-    fogHeightFalloff: 0.045,
-    fogStart: 24,
-    aerialStrength: 1.0,
+    // Density down, falloff up, start pushed well out: haze now thins fast
+    // with altitude (so it hugs the ground rather than sitting in a flat
+    // slab) and only starts accumulating well past the foreground, instead
+    // of softening the first hundred metres the player is standing in.
+    fogDensity: 0.0048,
+    fogHeightFalloff: 0.064,
+    fogStart: 55,
+    // Slightly reduced so full extinction is reached farther out — the near/
+    // mid/far depth ladder item 6 asks for needs the far field to still be
+    // the thing doing most of the desaturating, not a blanket over everything.
+    aerialStrength: 0.86,
     // Degrees. Drives sastrugi shear and dune orientation. Held 70-80 degrees
     // away from `sunAzimuth`: sastrugi ridges run along the wind, so when the
     // two align the sun rakes down every ridge, lights both flanks identically
@@ -48,13 +63,19 @@ export const S = {
     // flecks rather than facets), and dry granular sand barely transmits
     // light at all, so both defaults sit well below SNOWFLOW's snow values.
     // Structurally still the same tunables — only the resting point changed.
-    glintIntensity: 0.22,
-    glintGrazing: 0.72, // how hard the grazing-angle gate bites
+    // Raised for a stronger, more dramatic crest catch-light at grazing sun
+    // angles — item 3's "dune crests should catch the low sun dramatically".
+    glintIntensity: 0.34,
+    glintGrazing: 0.66,
     sssStrength: 0.15,
     sssRadius: 1.0,
-    detailNormalStrength: 1.0,
+    // Raised for stronger multi-scale surface structure underfoot — item 1.
+    // The shader already fades three tiling scales by pixel footprint, so
+    // this does not introduce new shimmer, it just makes each of the three
+    // read more strongly where it was already resolvable.
+    detailNormalStrength: 1.35,
     macroHeightScale: 1.0,
-    sastrugiStrength: 1.0,
+    sastrugiStrength: 1.2,
 
     // -------------------------------------------------------- dune generator
     // Phase 4 art controls for the macro dune-field bake. Deliberately a
@@ -87,7 +108,7 @@ export const S = {
     wakeSpray: 1.0,
     /** Screen-space speed streaks while surfing. */
     windStreaks: true,
-    streakStrength: 1.0,
+    streakStrength: 1.15,
 
     // ---------------------------------------------------------------- spells
     /** Master toggle. Off cancels everything in flight and hides both meshes. */
@@ -132,11 +153,26 @@ export const S = {
     // have fit snow. Nudged up slightly rather than left exactly as-is, so
     // the frame is not simply dim: partial compensation, not full parity with
     // SNOWFLOW's brightness target.
-    exposure: 0.118,
-    contrast: 1.14,
-    bloomStrength: 0.22,
-    grainStrength: 0.022,
-    sharpenStrength: 0.55,
+    // Nudged down slightly, not up — sunIntensity carries the brightness
+    // increase this pass wants, and dropping exposure to compensate keeps
+    // this from being "raise exposure globally" (explicitly ruled out).
+    exposure: 0.108,
+    // Raised for stronger directional contrast — item 8's "increase
+    // directional contrast, preserve shadow detail". Contrast here is
+    // applied about middle grey in linear before the AgX curve (see
+    // tonemap.fragment.wgsl), so it pushes into the shoulder rather than
+    // clipping after it — shadow detail survives, only the spread widens.
+    contrast: 1.30,
+    // Cut so bloom stays a tight glow around the sun/glints/high-energy
+    // effects rather than a broad wash over sunlit terrain — item 9's "do
+    // not bloom terrain broadly".
+    bloomStrength: 0.14,
+    grainStrength: 0.020,
+    // Raised for crisper sand microdetail — item 9. The sharpen pass is
+    // already contrast-adaptive (clamped to the local min/max), so this
+    // does not introduce haloing on flat expanses, only steepens edges that
+    // already have a gradient.
+    sharpenStrength: 0.70,
     // Restrained depth-aware desert heat distortion over distant sunlit
     // terrain. Implemented inside the existing DOF pass (see dof.fragment.wgsl)
     // rather than as a new render target or pass, so it is a few extra ALU ops
@@ -298,7 +334,7 @@ export const SCHEMA = [
             { k: "showCharacter", l: "Character", t: "b" },
             { k: "wireframe", l: "Wireframe", t: "b" },
             { k: "freezeTime", l: "Freeze time", t: "b" },
-            { k: "resolutionScale", l: "Resolution", t: "f", min: 0.5, max: 1.5, step: 0.05 },
+            { k: "resolutionScale", l: "Resolution", t: "f", min: 0.4, max: 1.25, step: 0.05 },
             {
                 k: "debugView", l: "Debug view", t: "e",
                 opts: ["beauty", "deform", "normals", "depth", "cascades", "footprint",
@@ -308,15 +344,36 @@ export const SCHEMA = [
     },
 ];
 
-/** Quality presets. Only the keys that differ from `ultra` need listing. */
+/**
+ * Quality presets. Only the keys that differ from `ultra` need listing.
+ *
+ * Phase 8A: renamed `balanced` to `medium` and added `low` as a genuine
+ * emergency fallback, per item 17's "keep LOW / MEDIUM / HIGH / ULTRA" and
+ * "do not silently run ULTRA on low-end hardware if it causes severe frame
+ * drops". `ultra` is unchanged — it is still the base `S` defaults, tuned
+ * for screenshots on capable hardware. `resolutionScale` now compounds with
+ * `main.js`'s `adaptToDeviceRatio: true` (added this pass so the render
+ * target actually matches device pixels instead of CSS pixels — see the
+ * engine-creation comment there), so the lower tiers pull it down more
+ * aggressively than before: a HiDPI display at `ultra`'s 1.0 now renders at
+ * genuinely more pixels than it did before that change, and a low-end
+ * device needs more headroom back, not less.
+ */
 export const PRESETS = {
     ultra: {},
-    high: { deformResolution: 2048, resolutionScale: 1.0, ssr: true, dof: true },
-    balanced: {
-        deformResolution: 1024, resolutionScale: 0.85,
-        ssr: false, dof: false,
+    high: { deformResolution: 2048, resolutionScale: 0.9, ssr: true, dof: true, heatShimmer: true },
+    medium: {
+        deformResolution: 1024, resolutionScale: 0.75,
+        ssr: false, dof: true, heatShimmer: false,
+    },
+    low: {
+        deformResolution: 512, resolutionScale: 0.55,
+        ssr: false, dof: false, heatShimmer: false,
     },
 };
+
+/** Ordered worst-to-best, for the runtime auto-downgrade in `main.js`. */
+export const PRESET_ORDER = ["low", "medium", "high", "ultra"];
 
 /** @type {Map<string, Set<(v:any, k:string) => void>>} */
 const listeners = new Map();

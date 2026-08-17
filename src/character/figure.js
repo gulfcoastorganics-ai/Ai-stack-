@@ -728,18 +728,27 @@ export class Figure {
 
             // ---- air target: out and up for balance --------------------------
             //
-            // Airborne, arms spread out to the sides rather than continuing
-            // whatever the walk swing was doing — a figure with no ground
-            // under it does not keep pumping its arms. Faded out by `cast`
-            // so an ability fired mid-air still reads as the ability, not a
-            // balance pose fighting it.
+            // Airborne, arms spread rather than continuing whatever the walk
+            // swing was doing — a figure with no ground under it does not
+            // keep pumping its arms. Faded out by `cast` so an ability fired
+            // mid-air still reads as the ability, not a balance pose
+            // fighting it.
+            //
+            // Phase 8A: the lateral offset here used to be large enough
+            // (0.36 m, almost a straight horizontal reach at this arm's
+            // 0.54 m length) that a character caught airborne mid-screenshot
+            // read as a rigid T-pose rather than a relaxed balance stance —
+            // item 11's explicit complaint. Pulled the sideways reach in,
+            // pushed more of it forward and down instead: a real person
+            // steadying themselves in the air brings their arms toward their
+            // centre and slightly ahead, not straight out to the sides.
             if (!ch.grounded) {
                 const air = clamp(ch.airTime * 4.0, 0, 1) * (1 - cast);
                 if (air > 0.001) {
-                    const rise = ch.verticalVelocity > 0 ? 0.16 : -0.06;
-                    const axp = _sh[0] + rX * (sgn * 0.36) + fX * 0.10 + uX * (0.12 + rise);
-                    const ayp = _sh[1] + rY * (sgn * 0.36) + fY * 0.10 + uY * (0.12 + rise);
-                    const azp = _sh[2] + rZ * (sgn * 0.36) + fZ * 0.10 + uZ * (0.12 + rise);
+                    const rise = ch.verticalVelocity > 0 ? 0.10 : -0.04;
+                    const axp = _sh[0] + rX * (sgn * 0.22) + fX * 0.24 + uX * (0.04 + rise);
+                    const ayp = _sh[1] + rY * (sgn * 0.22) + fY * 0.24 + uY * (0.04 + rise);
+                    const azp = _sh[2] + rZ * (sgn * 0.22) + fZ * 0.24 + uZ * (0.04 + rise);
                     tx += (axp - tx) * air;
                     ty += (ayp - ty) * air;
                     tz += (azp - tz) * air;

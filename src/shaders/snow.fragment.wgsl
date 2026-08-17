@@ -484,6 +484,26 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         color += sunRadiance * g * shadow * (1.0 - iceAmount * 0.6) * 0.55;
     }
 
+    // ---- crest highlight ----------------------------------------------------
+    // A thin, warm grazing highlight along exposed dune crests — item 3's
+    // "dune crests should catch the low sun dramatically". Reuses the same
+    // baked `exposure` channel the wind streaks and sastrugi cross-fade
+    // already read, so "this is a crest" means the same thing here it does
+    // everywhere else in this material. The grazing-view term is what keeps
+    // this a thin rim along the silhouette rather than a flat wash over the
+    // whole exposed face — a cartoon outline would ignore `NdotV` entirely
+    // and light the crest uniformly; this only brightens where the eye is
+    // looking nearly along the surface, which is where a real grazing
+    // highlight actually sits.
+    if (rockExposed < 0.4) {
+        let crestGate = smoothstep(0.55, 0.92, exposure);
+        if (crestGate > 0.001) {
+            let grazeV = pow(1.0 - NdotV, 3.0);
+            let crest = crestGate * grazeV * clamp(NdotL, 0.0, 1.0) * shadow;
+            color += sunRadiance * albedo * crest * 0.85;
+        }
+    }
+
     // ---- wind-driven surface sand -------------------------------------------
     // Thin streams of grain skimming downwind across exposed dune crests, and
     // almost none of it on sheltered lee faces — reusing the `exposure` channel
@@ -509,7 +529,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
             // hollows — exactly where real wind lofts sand and exactly where
             // it does not.
             let gate = smoothstep(0.35, 0.85, exposure) * uniforms.windStrength * streakFade;
-            color += grains * gate * sunRadiance * INV_PI * shadow * 0.10;
+            color += grains * gate * sunRadiance * INV_PI * shadow * 0.16;
         }
     }
 
