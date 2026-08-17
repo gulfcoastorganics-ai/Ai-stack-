@@ -281,6 +281,12 @@ export class Figure {
         const gx = ch.position.x;
         const gz = ch.position.z;
         const groundY = this.terrain.heightAt(gx, gz);
+        // Exposed for the material shader's procedural weathering (dust
+        // accumulation near the boots, sun bleaching up high) — see
+        // `character.js`'s `groundY` uniform. Not otherwise used by anything
+        // in this file; storing it here is the only change, no pose/gait
+        // logic is touched.
+        this.groundY = groundY;
 
         const rootY = groundY - this.sink + this.hipY + this.bob;
 

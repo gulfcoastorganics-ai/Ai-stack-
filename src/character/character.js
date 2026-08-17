@@ -39,58 +39,74 @@ const CHAR_CASCADES = 2;
 
 /**
  * Material palette. Eight slots, uploaded as two vec4 arrays so every value is
- * live-tunable and nothing is baked into the shader: deep indigo wool, a
- * lighter blue-grey mantle, a pale under-layer at the collar, dark leather.
+ * live-tunable and nothing is baked into the shader.
  *
- * Two properties of these numbers are deliberate and were measured off the
- * render rather than picked as colours.
+ * SANDSTORM Phase 5: retinted from SNOWFLOW's blue-indigo winter palette onto
+ * a desert traveler's layered charcoal / weathered sandstone / rust palette
+ * (see the file header for the layer assignment `M_ROBE`..`M_METAL` follow).
+ * The slot *indices* and what geometry reads which slot (`build.js`,
+ * `cloth.js`) are unchanged from SNOWFLOW — only the eight colours are new,
+ * plus one previously-spare slot (7) now carries a real material (metal
+ * accents) instead of sitting unused.
  *
- * They are *very* saturated. At thirteen degrees the sun has lost most of its
- * blue — the direct beam here is roughly 17:13:6 — so a merely blue-ish albedo
- * comes back out of the multiply as warm grey. The blue has to be about four
- * times the red in the albedo just to survive to two-to-one in the lit areas.
+ * Two properties of these numbers are deliberate and carried over from
+ * SNOWFLOW's own reasoning, restated for the new hue:
  *
- * They are *very* dark. AgX compresses hard, so an eighth of the snow's albedo
- * is only about three stops down and lands near mid grey on screen. Anything
- * lighter stops reading as a silhouette against the field, which is the one
- * thing the figure has to do at fifteen metres.
+ * They are still fairly saturated, just on the rust/ochre axis rather than
+ * blue. At a low, warm sun the direct beam is strongly red-shifted, so a
+ * weak, desaturated brown reads as flat grey once lit — the accent slot
+ * especially needs real saturation to survive as a rust colour rather than
+ * washing out to the same tan as the ground.
+ *
+ * They are still dark. AgX compresses hard, so a dark garment several stops
+ * down from the sand's own albedo is what keeps the traveler read as a
+ * silhouette against the field rather than blending into it — sand's albedo
+ * dropped from SNOWFLOW's ~0.86 to Phase 1's ~0.6-0.8, so the character no
+ * longer needs to be *quite* as dark as SNOWFLOW's figure to still separate,
+ * but "not beige" is still the operative constraint (item 7).
  */
 const PALETTE = [
     // rgb, roughness
-    [0.030, 0.048, 0.125, 0.80], // 0 robe, deep indigo
-    [0.075, 0.105, 0.185, 0.74], // 1 mantle, blue-grey
-    [0.230, 0.225, 0.205, 0.82], // 2 collar lining, warm pale
-    [0.048, 0.033, 0.024, 0.60], // 3 leather
-    [0.135, 0.095, 0.072, 0.85], // 4 skin, deep in shade
-    [0.120, 0.195, 0.310, 0.70], // 5 trim / scarf, pale blue
-    [0.700, 0.720, 0.760, 0.85], // 6 fur (unused by the fabric shader)
-    [0.100, 0.100, 0.100, 0.80], // 7 spare
+    [0.038, 0.030, 0.024, 0.82], // 0 M_ROBE:   outer coat, charcoal/deep brown
+    [0.155, 0.120, 0.082, 0.76], // 1 M_MANTLE: shoulder wrap, weathered sandstone/khaki
+    [0.220, 0.190, 0.148, 0.80], // 2 M_TUNIC:  inner tunic lining, warm pale undyed cloth
+    [0.052, 0.036, 0.024, 0.55], // 3 M_LEATHER: belt, boots, wraps — dark worn leather
+    [0.145, 0.100, 0.075, 0.85], // 4 M_SKIN:   deep in shadow under the hood/scarf
+    [0.420, 0.185, 0.085, 0.62], // 5 M_TRIM:   the one controlled accent — muted rust
+    [0.360, 0.290, 0.205, 0.88], // 6 M_FUR:    frayed scarf/hem fibres, dusty khaki
+    [0.048, 0.043, 0.040, 0.30], // 7 M_METAL:  sparse buckle/clip accents, dark oxidised
 ];
 
 /**
  * (sheen, anisotropy, transmission, weave depth) per slot.
  *
- * Transmission is the number to be careful with. Sunlight through a *blue*
- * robe, multiplied by a *warm* sun, comes back grey — so a generous
- * transmission term does not make the garment glow, it desaturates it to the
- * point where the albedo stops mattering. Heavy wool is close to opaque; only
- * the thin under-layer gets a real value.
+ * Transmission is still the number to be careful with — a generous value on
+ * a dark garment does not make it glow, it washes the albedo out toward the
+ * warm sun's own colour. Heavy coat fabric stays close to opaque; only the
+ * thin tunic lining gets a real value. `M_METAL` carries near-zero sheen and
+ * weave (bare, hard-edged accents, not fabric) and the lowest roughness in
+ * the palette, which is as close to a specular metal read as this shader's
+ * dielectric-only Fresnel can get without extending the BRDF itself.
  */
 const PARAMS = [
-    [0.22, 0.55, 0.05, 1.00],
-    [0.28, 0.45, 0.07, 0.90],
-    [0.35, 0.30, 0.22, 1.10],
-    [0.06, 0.20, 0.01, 0.35],
-    [0.05, 0.00, 0.08, 0.00],
-    [0.25, 0.60, 0.12, 1.00],
-    [1.00, 0.00, 0.90, 0.00],
-    [0.20, 0.00, 0.00, 0.50],
+    [0.20, 0.50, 0.04, 1.00], // robe: heavy outer coat, low transmission
+    [0.30, 0.40, 0.08, 0.85], // mantle: lighter wrap, breathes a little more
+    [0.38, 0.25, 0.20, 1.05], // tunic: thin under-layer, the one real glow
+    [0.05, 0.15, 0.01, 0.30], // leather: minimal sheen, no weave
+    [0.05, 0.00, 0.08, 0.00], // skin: unchanged role from SNOWFLOW
+    [0.30, 0.55, 0.10, 0.95], // trim/rust: coarse wrapped-fabric weave, strong fold shading
+    [0.85, 0.00, 0.35, 0.00], // fur-as-fray: still sheen-driven, less transmissive than snow fur was
+    [0.04, 0.00, 0.00, 0.00], // metal: sharp, unweathered highlight
 ];
 
 // ------------------------------------------------------- module-scope scratch
 const _droop = new Vector3();
 const _screen = new Vector2();
-const _furCol = new Color3(0.74, 0.755, 0.795);
+// SANDSTORM: was a pale blue-grey (0.74, 0.755, 0.795) for snow-hood fur.
+// Repurposed to a dusty, sun-bleached khaki fibre tone — see build.js's note
+// on why the hood fur band itself was removed and only the cuff/wrap band
+// (now read as frayed wrap fibres, not fur) remains.
+const _furCol = new Color3(0.58, 0.50, 0.38);
 
 export class Character {
     /**
@@ -114,7 +130,7 @@ export class Character {
         // ---- transform texture -------------------------------------------
         this._texData = new Float32Array(TEX_W * TEX_H * 4);
         let row = CLOTH_ROW0;
-        /** Flat (rowBase, cols, rows, 0) per panel, for the vertex shaders. */
+        /** Flat (rowBase, cols, rows, closed) per panel, for the vertex shaders. */
         this._panelParams = new Float32Array(6 * 4);
         for (let i = 0; i < this.panels.length; i++) {
             const p = this.panels[i];
@@ -123,6 +139,7 @@ export class Character {
             this._panelParams[i * 4] = row;
             this._panelParams[i * 4 + 1] = p.cols;
             this._panelParams[i * 4 + 2] = p.rows;
+            this._panelParams[i * 4 + 3] = p.closed ? 1 : 0;
             row += p.rows;
         }
         if (row > TEX_H) throw new Error("transform texture too short for the panels");
@@ -203,7 +220,7 @@ export class Character {
             "matAlbedo", "matParams",
             "fogDensity", "fogHeightFalloff", "fogStart", "aerialStrength",
             "ambientIntensity", "sssStrength", "weaveDensity",
-            "screenSize",
+            "screenSize", "groundY",
             ...SPELL_LIGHT_UNIFORMS,
         ];
         const attributes = isCloth
@@ -458,7 +475,7 @@ export class Character {
             m.setFloat("shadowSoftness", 1.4);
             // Tighter than the terrain's: the figure is small, its cascade is
             // the near one, and a large bias here detaches the contact shadow
-            // between the boots and the snow — which is the shadow that tells
+            // between the boots and the sand — which is the shadow that tells
             // you the character is standing on the ground rather than in it.
             m.setFloat("shadowBias", 0.012);
 
@@ -469,6 +486,13 @@ export class Character {
             m.setFloat("ambientIntensity", S.ambientIntensity);
         }
 
+        // World Y of the ground under the character right now — `Figure` already
+        // computes this every frame for the pelvis solve, exposed here purely for
+        // the fabric shader's procedural weathering (dust low, sun-bleach high).
+        // Only the body/cloth materials read it; the fur material has no
+        // weathering term.
+        const groundY = this.figure.groundY || 0;
+
         const eng = this.scene.getEngine();
         _screen.set(eng.getRenderWidth(), eng.getRenderHeight());
 
@@ -477,10 +501,11 @@ export class Character {
             m.setArray4("matParams", this._matParams);
             m.setFloat("sssStrength", S.sssStrength);
             m.setVector2("screenSize", _screen);
-            // Threads per metre. Coarse hand-woven wool, which is what puts the
-            // weave right at the edge of visibility at the distance the figure
-            // is normally framed — present in a close-up, gone by ten metres.
-            m.setFloat("weaveDensity", 210);
+            // Threads per metre. Coarser than SNOWFLOW's wool, closer to a
+            // hand-woven cotton/linen weave — still faded out by pixel footprint
+            // in the shader well before the figure is far enough away to alias.
+            m.setFloat("weaveDensity", 170);
+            m.setFloat("groundY", groundY);
         }
         this.clothMat.setArray4("panelParams", this._panelParams);
 

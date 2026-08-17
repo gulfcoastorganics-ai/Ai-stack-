@@ -19,7 +19,7 @@ fn main(input: VertexInputs) -> FragmentInputs {
     let pp = uniforms.panelParams[i32(vertexInputs.position.z)];
     let s = sampleCloth(
         charTex, i32(pp.x), i32(pp.y), i32(pp.z),
-        vertexInputs.position.x, vertexInputs.position.y
+        vertexInputs.position.x, vertexInputs.position.y, i32(pp.w)
     );
     let clip = uniforms.viewProjection * vec4f(s.pos, 1.0);
     vertexOutputs.vViewZ = clip.w;

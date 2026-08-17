@@ -15,14 +15,14 @@
 //                is what makes the mantle's shoulder read as a fabric plane and
 //                not a shaded cylinder.
 //   transmission Thin fabric over a lit edge glows. Same back-scatter term the
-//                snow uses, which is not a coincidence — it is the same physics
+//                ground uses, which is not a coincidence — it is the same physics
 //                at a different mean free path.
 //
 // On top of that a procedural weave supplies a normal and a cavity at a scale
 // far below the geometry, faded out by pixel footprint so it never aliases.
 //
 // Everything downstream of the BRDF — cascade selection, PCSS, aerial
-// perspective — is the identical code the snow runs, from shared includes. The
+// perspective — is the identical code the ground runs, from shared includes. The
 // character has to sit in the same light as the field or it will look pasted on
 // no matter how good the fabric is.
 // -----------------------------------------------------------------------------
@@ -74,6 +74,11 @@ uniform sssStrength: f32;
 /// only place the physical scale of the cloth is decided.
 uniform weaveDensity: f32;
 uniform screenSize: vec2f;
+/// World Y of the ground directly under the character this frame — see
+/// `character.js`. Used only for procedural weathering (dust low, sun-bleach
+/// high); nowhere near precise enough to be a real ground-height lookup, and
+/// does not need to be.
+uniform groundY: f32;
 
 uniform spellLightPos: array<vec4f, 4>;
 uniform spellLightCol: array<vec4f, 4>;
@@ -185,7 +190,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let TBN = cotangentFrame(N, dp1, dp2, duv1, duv2);
 
     // Fade the weave out once a thread is under a pixel, or it aliases into a
-    // crawling moire — the same footprint logic the snow's detail layers use.
+    // crawling moire — the same footprint logic the ground's detail layers use.
     // At two hundred threads a metre this means the weave only exists in the
     // near field, which is exactly where a real one is visible.
     let uvFoot = max(length(duv1), length(duv2));
@@ -205,9 +210,41 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     albedo *= 0.90 + 0.20 * slub;
     roughness = clamp(roughness * (0.94 + 0.12 * slub), 0.05, 1.0);
 
+    // ---- desert weathering --------------------------------------------------
+    // Procedural wear, driven by height above the ground and by world position
+    // — no painted textures, no second UV set. `heightAbove` is deliberately
+    // coarse: `groundY` is one sample taken under the character's root, not a
+    // real per-vertex ground height, so this is only ever precise enough to
+    // answer "is this near the boots" — which is all it needs to.
+    let heightAbove = world.y - uniforms.groundY;
+
+    // Dust accumulation: strongest right at the sole, fading out by the knee.
+    // Lightens and desaturates toward a dusty sand tone and roughens slightly
+    // — settled dust is matte, not glossy.
+    let dustT = 1.0 - smoothstep(0.0, 0.55, heightAbove);
+    if (dustT > 0.001) {
+        let dustNoise = noise2(world.xz * 3.5 + world.y * 1.7) * 0.5 + 0.5;
+        let dustAmt = dustT * (0.35 + 0.5 * dustNoise);
+        let dustCol = vec3f(0.62, 0.52, 0.38);
+        albedo = mix(albedo, dustCol, dustAmt * 0.6);
+        roughness = mix(roughness, 0.92, dustAmt * 0.5);
+    }
+
+    // Sun bleaching: upward-facing surfaces high on the figure lighten very
+    // slightly — years of sun on the shoulders and hood, not the underside of
+    // a sleeve.
+    let bleach = clamp(N.y, 0.0, 1.0) * smoothstep(0.9, 1.6, heightAbove);
+    albedo = mix(albedo, albedo * 1.35 + vec3f(0.02), bleach * 0.30);
+
+    // Seam darkening: protected creases — the same weave `cavity` the detail
+    // normal above already computed, reused rather than re-derived — stay a
+    // little darker than the exposed cloth beside them, so garment boundaries
+    // read as folds rather than as a flat painted line.
+    albedo *= mix(1.0, 0.82, (1.0 - cavity) * 0.6);
+
     // Baked at the vertex, times the weave cavity. No screen-space occlusion:
-    // it is a two-metre silhouette against forty metres of snow, and the pass
-    // does not pay for itself on this content.
+    // it is a two-metre silhouette against a wide desert, and the pass does
+    // not pay for itself on this content.
     var ao = input.vAux.y * cavity;
 
     // ------------------------------------------------------------- lighting
@@ -260,7 +297,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // one that mattered — Charlie is an *inverted* distribution: it is near
         // its peak everywhere except close to the mirror direction, so applied
         // flat it is not a rim, it is a uniform veil over the entire garment.
-        // At full strength it lifted a navy robe to the same value as the snow
+        // At full strength it lifted a dark robe to the same value as the sand
         // behind it and erased the silhouette completely.
         //
         // The grazing gate puts the energy back where fibre scatter actually
@@ -275,9 +312,9 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 
     // --- ambient ------------------------------------------------------------
     var irradiance = shIrradiance(N, uniforms.shR) * uniforms.ambientIntensity;
-    // Bounce off the snow. A figure standing on an 85%-albedo field is lit from
-    // below almost as much as from above, and leaving it out is what makes
-    // characters composited into snow scenes look cut out.
+    // Bounce off the sand. A figure standing on a bright, sunlit field is lit
+    // from below as well as from above, and leaving it out is what makes
+    // characters composited into outdoor scenes look cut out.
     let up = clamp(-N.y * 0.5 + 0.5, 0.0, 1.0);
     irradiance += shIrradiance(vec3f(0.0, 1.0, 0.0), uniforms.shR)
                 * uniforms.ambientIntensity * 0.40 * up;

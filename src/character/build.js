@@ -32,13 +32,19 @@ import {
 } from "./figure.js";
 
 // ------------------------------------------------------------- material slots
-export const M_ROBE = 0;     // deep indigo wool
-export const M_MANTLE = 1;   // lighter blue-grey over-mantle
-export const M_TUNIC = 2;    // pale cream under-layer
+//
+// SANDSTORM Phase 5: slot indices and which geometry reads which slot are
+// unchanged from SNOWFLOW — only what each slot's colours/params represent
+// changed (see the `PALETTE`/`PARAMS` tables in character.js) — plus one new
+// slot, M_METAL, using what was SNOWFLOW's unused eighth "spare" entry.
+export const M_ROBE = 0;     // outer coat, charcoal/deep brown
+export const M_MANTLE = 1;   // shoulder wrap, weathered sandstone/khaki
+export const M_TUNIC = 2;    // inner tunic lining
 export const M_LEATHER = 3;  // belt and boots
 export const M_SKIN = 4;     // face, deep in shade
-export const M_TRIM = 5;     // pale blue banding
-export const M_FUR = 6;      // hood and cuff trim
+export const M_TRIM = 5;     // the scarf/wrap accent — the one controlled rust colour
+export const M_FUR = 6;      // frayed wrap-fibre trim (see buildFur's note — no longer at the hood)
+export const M_METAL = 7;    // sparse buckle/clip accents
 
 /** Segments around a limb. 14 is smooth at the distances this is seen from. */
 const SEG = 14;
@@ -278,6 +284,34 @@ export function buildBody(scene) {
     ];
     loft(B, belt, M_LEATHER, [0, 0, 1], false, false);
 
+    // ---- belt buckle --------------------------------------------------
+    // A minimal flat box glued to the belt's front-centre point, on the new
+    // M_METAL slot (item 6/16). Disconnected from the belt loft rather than
+    // welded into it — eight vertices, six quads, no shared topology to keep
+    // correct — so it stays a negligible, genuinely sparse metal accent
+    // rather than a reason to touch the belt's own ring math.
+    {
+        const bx = 0.045, by = 0.026, bz = 0.014;
+        const cx = 0, cy = 0.995, cz = 0.140;
+        const bones = spineBones(0.995);
+        const v = (x, y, z, u, uvv) =>
+            B.vert(x, y, z, u, uvv, M_METAL, 0.75, bones[0], bones[1], bones[2], bones[3]);
+        const p000 = v(cx - bx, cy - by, cz - bz, 0, 0);
+        const p100 = v(cx + bx, cy - by, cz - bz, 1, 0);
+        const p110 = v(cx + bx, cy + by, cz - bz, 1, 1);
+        const p010 = v(cx - bx, cy + by, cz - bz, 0, 1);
+        const p001 = v(cx - bx, cy - by, cz + bz, 0, 0);
+        const p101 = v(cx + bx, cy - by, cz + bz, 1, 0);
+        const p111 = v(cx + bx, cy + by, cz + bz, 1, 1);
+        const p011 = v(cx - bx, cy + by, cz + bz, 0, 1);
+        B.quad(p001, p101, p111, p011); // front (+z, faces outward)
+        B.quad(p100, p000, p010, p110); // back
+        B.quad(p000, p001, p011, p010); // left
+        B.quad(p101, p100, p110, p111); // right
+        B.quad(p010, p011, p111, p110); // top
+        B.quad(p001, p000, p100, p101); // bottom
+    }
+
     // ---- neck + head ------------------------------------------------------
     const neck = [
         ring(0, 1.42, -0.005, 0.062, 0.058, 0.35, [B_NECK, 1, B_HEAD, 0]),
@@ -494,51 +528,39 @@ function buildHood(B) {
 //  Fur
 // -----------------------------------------------------------------------------
 
-/** Shells per fur band. Below about 18 the layering is visible as banding. */
-const HOOD_SHELLS = 22;
-const CUFF_SHELLS = 18;
+/** Shells in the remaining band. Below about 18 the layering is visible as banding. */
+const CUFF_SHELLS = 16;
 
 /**
- * Shell fur.
+ * Shell fur — repurposed this phase as frayed wrap-fibre trim rather than fur.
  *
  * A trim band is modelled as a partial torus around the edge it decorates: a
  * ring of cross-sections, each an arc of directions pointing away from the
  * garment. That surface is then emitted once per shell, each copy pushed
  * further along its own direction, and the fragment shader alpha-tests a hashed
  * strand field whose threshold rises with the shell parameter — so strands
- * taper, end at different lengths, and the band reads as fur rather than as a
- * smooth sausage.
+ * taper, end at different lengths, and the band reads as loose fibres rather
+ * than as a smooth sausage. The mechanism is unchanged from SNOWFLOW's hood
+ * fur; only where it is used and how far the strands reach changed.
  *
- * Bone-bound rather than cloth-bound, deliberately: the hood rim rides the hood
- * bone and the cuffs ride the forearms, both of which are rigid. Binding fur to
- * a simulated surface would need the shell direction to come out of the cloth
- * solve — a second vertex program, for very little visible gain.
+ * SANDSTORM: SNOWFLOW ran this band around the hood rim as well as the cuffs.
+ * A desert hood should not read as fur-trimmed, so that band is gone —
+ * `hoodRimPoint`'s geometry is still shared with `buildHood` for the opening
+ * itself, just no longer decorated with shells here. What remains is the
+ * forearm-wrap band, shortened and coarsened from a plush cuff into the frayed
+ * ends of a wound cloth wrap (item 2's "wrapped forearms", item 9's "frayed
+ * edges / loose fabric fibres").
+ *
+ * Bone-bound rather than cloth-bound, deliberately: the wrap rides the
+ * forearm bone, which is rigid. Binding it to a simulated surface would need
+ * the shell direction to come out of the cloth solve — a second vertex
+ * program, for very little visible gain.
  */
 export function buildFur(scene) {
     const B = new Builder();
     B.explicitNormals = true;
-    const p = [0, 0, 0];
 
-    // ---- hood rim ---------------------------------------------------------
-    // The band's outward direction is the rim's own bisector: away from the
-    // skull, tilted along the face direction so the trim frames the opening.
-    const cols = 26;
-    const bases = new Float32Array(cols * 3);
-    const outs = new Float32Array(cols * 3);
-    for (let c = 0; c < cols; c++) {
-        hoodRimPoint(c / cols, p);
-        bases[c * 3] = p[0]; bases[c * 3 + 1] = p[1]; bases[c * 3 + 2] = p[2];
-        let dx = p[0] - HEAD_C[0], dy = p[1] - HEAD_C[1], dz = p[2] - HEAD_C[2];
-        const dl = Math.hypot(dx, dy, dz) || 1;
-        dx = dx / dl + FACE_DIR[0] * 0.45;
-        dy = dy / dl + FACE_DIR[1] * 0.45;
-        dz = dz / dl + FACE_DIR[2] * 0.45;
-        const l2 = Math.hypot(dx, dy, dz) || 1;
-        outs[c * 3] = dx / l2; outs[c * 3 + 1] = dy / l2; outs[c * 3 + 2] = dz / l2;
-    }
-    emitFurBand(B, cols, bases, outs, 0.024, 0.048, HOOD_SHELLS, B_HOOD, 0.62);
-
-    // ---- cuffs ------------------------------------------------------------
+    // ---- forearm wrap fray -------------------------------------------------
     for (let a = 0; a < 2; a++) {
         const s = a === 0 ? -1 : 1;
         const bone = a === 0 ? B_FORE_L : B_FORE_R;
@@ -550,15 +572,17 @@ export function buildFur(scene) {
         for (let c = 0; c < n; c++) {
             const ang = (c / n) * Math.PI * 2;
             const rx = Math.sin(ang), rz = Math.cos(ang);
-            // Sits on the sleeve at the wrist, just above the loose cuff rows,
-            // where the garment is pinned hard enough that a bone-bound band
-            // cannot visibly separate from it.
+            // Sits on the forearm partway to the wrist, where a wound wrap's
+            // frayed lower edge would end.
             cb[c * 3] = s * 0.240 + rx * 0.066;
             cb[c * 3 + 1] = 0.900;
             cb[c * 3 + 2] = 0.012 + rz * 0.064;
             co[c * 3] = rx; co[c * 3 + 1] = 0; co[c * 3 + 2] = rz;
         }
-        emitFurBand(B, n, cb, co, 0.015, 0.032, CUFF_SHELLS, bone, 0.52);
+        // Shorter and coarser than SNOWFLOW's cuff fur (len 0.032 -> 0.020):
+        // a handful of frayed threads reads convincingly at this length,
+        // where the same length read as a lush pelt.
+        emitFurBand(B, n, cb, co, 0.012, 0.020, CUFF_SHELLS, bone, 0.52);
     }
 
     return finishSkinned(scene, "charFur", B, true);

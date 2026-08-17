@@ -14,7 +14,7 @@ attribute aux: vec2f;        // (material id, baked occlusion)
 
 uniform viewProjection: mat4x4f;
 uniform cameraPos: vec3f;
-/// Per panel: (first row in the transform texture, cols, rows, unused).
+/// Per panel: (first row in the transform texture, cols, rows, closed flag).
 uniform panelParams: array<vec4f, 6>;
 
 var charTex: texture_2d<f32>;
@@ -31,7 +31,7 @@ fn main(input: VertexInputs) -> FragmentInputs {
     let pp = uniforms.panelParams[i32(vertexInputs.position.z)];
     let s = sampleCloth(
         charTex, i32(pp.x), i32(pp.y), i32(pp.z),
-        vertexInputs.position.x, vertexInputs.position.y
+        vertexInputs.position.x, vertexInputs.position.y, i32(pp.w)
     );
 
     vertexOutputs.vWorld = s.pos;

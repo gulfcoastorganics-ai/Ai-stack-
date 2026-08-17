@@ -1,18 +1,21 @@
 /**
  * Garment simulation — verlet cloth on coarse grids.
  *
- * Each garment is a closed tube of particles, `cols` around by `rows` down.
- * The grids are deliberately coarse (twenty by twelve for the robe) because the
- * render mesh does not use them directly: the vertex shader reconstructs a
- * smooth surface from them with Catmull-Rom, so tessellation and simulation cost
- * are completely decoupled. Doubling the visible smoothness costs nothing here.
+ * Each garment is a grid of particles, `cols` around (or across) by `rows`
+ * down. Most panels are a closed ring, as every SNOWFLOW garment was; the
+ * split coat skirts and the scarf tail are open sheets instead — see
+ * `ClothPanel.closed`. The grids are deliberately coarse (twenty by eleven
+ * for a coat skirt) because the render mesh does not use them directly: the
+ * vertex shader reconstructs a smooth surface from them with Catmull-Rom, so
+ * tessellation and simulation cost are completely decoupled. Doubling the
+ * visible smoothness costs nothing here.
  *
  * Every particle carries a bind-pose position and one bone. Its kinematic target
  * each frame is that bind position pushed through the bone's skinning matrix —
  * exactly what a rigidly-skinned vertex would do. A per-particle `pinRate`
  * decides how hard it is pulled toward that target, in units of 1/second:
  *
- *   Infinity   the waistband, the collar, the shoulder of a sleeve. Welded.
+ *   Infinity   the waistband, the collar, the throat of the scarf. Welded.
  *   10-60      follows the body closely, with a frame or two of give.
  *   1-5        follows loosely — this is where a garment starts to read as cloth.
  *   0.2-0.5    shape memory only. Stops a free hem from slowly collapsing into
@@ -24,8 +27,10 @@
  * change has to be written as a rate.
  *
  * Wind is *apparent* wind — the field wind minus the character's own velocity —
- * with quadratic drag, so the robe whips back hard during a snow-surf run
- * without needing a special case for it.
+ * with quadratic drag, so the coat and scarf whip back hard during a sand-surf
+ * run without needing a special case for it. The direction and strength come
+ * from the same `S.windDirection`/`S.windStrength` the terrain and particles
+ * read — there is no separate cloth wind.
  *
  * Allocation: none per frame. All state is typed arrays sized at construction.
  */
@@ -36,7 +41,7 @@ import {
     B_UPPER_R, B_FORE_R, B_HAND_R, B_NECK, B_SHIN_L, B_SHIN_R,
     B_THIGH_L, B_THIGH_R, B_FOOT_L, B_FOOT_R,
 } from "./figure.js";
-import { M_ROBE, M_MANTLE } from "./build.js";
+import { M_ROBE, M_MANTLE, M_TRIM } from "./build.js";
 
 /** Which body capsules a panel is allowed to collide against. */
 const C_TORSO = 1;
@@ -57,8 +62,16 @@ export class ClothPanel {
         this.aoTop = spec.aoTop;
         this.aoBottom = spec.aoBottom;
         this.collide = spec.collide;
-        /** Rows at the bottom that check the snow surface. */
+        /** Rows at the bottom that check the sand surface. */
         this.groundRows = spec.groundRows || 0;
+        /**
+         * Whether column `cols-1` wraps back to column `0` — true for a tube
+         * (the shoulder wrap), false for an open sheet whose two edges are
+         * real, independent boundaries (the split coat skirts, the scarf
+         * tail). Defaults true so any panel that doesn't set it keeps
+         * SNOWFLOW's original closed-ring behaviour.
+         */
+        this.closed = spec.closed !== false;
         /** Row in the shared transform texture where this panel's grid starts. */
         this.nodeRow = 0;
 
@@ -121,63 +134,65 @@ function curve(table, t) {
 }
 
 /**
- * The robe: a long tube from the waist, flaring to a hem that is cut high at
- * the front so the boots read, and trails behind. The asymmetry is what makes
- * the silhouette move when the figure turns.
+ * One half of the outer coat's lower skirt.
+ *
+ * SNOWFLOW's robe was one closed tube all the way round the waist. Item 19
+ * rules that shape out here — floor-length, unbroken cloth around both legs
+ * reads as implausible the moment the traveller sprints, dashes or surfs —
+ * so the skirt is cut into two open panels instead, seamed only at
+ * centre-front (`a=0`) and centre-back (`a=pi`). Each half swings on its own
+ * side of the stride rather than one cone dragging across both legs, and
+ * because the panels are `closed: false` the solver never links column
+ * `cols-1` back to column `0` — see `_distance`'s guard and `clothNode`'s
+ * clamp-instead-of-wrap in charSkin.wgsl.
  */
-function makeRobe() {
+function makeCoatSkirt(side) {
     const p = new ClothPanel({
-        // Thirty-six columns is set by the fold count, not by smoothness: nine
-        // pleats need four samples each to survive the grid at all, and the
-        // Catmull-Rom reconstruction turns four samples per fold into a clean
-        // wave. Twenty columns aliased them into a wobble.
-        name: "robe", cols: 36, rows: 12, matId: M_ROBE,
-        renderCols: 72, renderRows: 32,
-        // Metres of surface, so the shader's weave and slub scales are physical.
-        weaveU: 1.75, weaveV: 1.05,
-        aoTop: 0.55, aoBottom: 0.42,
+        name: "coatSkirt" + side, cols: 20, rows: 11, matId: M_ROBE,
+        renderCols: 40, renderRows: 30,
+        weaveU: 0.95, weaveV: 1.00,
+        aoTop: 0.55, aoBottom: 0.4,
         collide: C_TORSO | C_LEGS, groundRows: 2,
+        closed: false,
     });
 
-    const RATE = [Infinity, 30, 10, 4, 1.6, 0.9, 0.55, 0.4, 0.35, 0.3, 0.3, 0.3];
+    // Lighter and looser than SNOWFLOW's robe rates: dry desert cloth, not
+    // wet-heavy winter wool.
+    const RATE = [Infinity, 26, 9, 3.6, 1.5, 0.85, 0.55, 0.4, 0.32, 0.28, 0.26];
+
+    // side 0 = left half, running centre-back round to centre-front on -x;
+    // side 1 = right half, centre-front round to centre-back on +x. The two
+    // spans meet exactly at a=0 and a=pi, which is where the seam sits.
+    const aStart = side === 0 ? Math.PI : 0;
+    const aSpan = Math.PI;
 
     for (let j = 0; j < p.rows; j++) {
         const v = j / (p.rows - 1);
         for (let i = 0; i < p.cols; i++) {
-            const a = (i / p.cols) * Math.PI * 2;
+            const t = i / (p.cols - 1);
+            const a = aStart + t * aSpan;
             const sa = Math.sin(a), ca = Math.cos(a);
-            // The flare accelerates downward, and the back flares furthest —
-            // that extra fabric is what becomes the train.
+            // The flare accelerates downward, same reasoning as SNOWFLOW's robe.
             const f = Math.pow(v, 1.25);
 
-            // Pleats. A garment cut as a smooth cone stays a smooth cone: the
-            // solver has nothing to break the symmetry with, and a robe with no
-            // vertical folds reads as a traffic cone no matter how good the
-            // shading is. Putting the folds in the *rest shape* means the
-            // constraints preserve them, they deepen toward the hem where the
-            // fabric is loose, and they travel with the garment rather than
-            // sliding across it the way a normal map would.
-            //
-            // Three incommensurate frequencies, so no two folds are alike and
-            // the pattern never repeats around the tube.
+            // Pleats in the rest shape, not a normal map, so the folds deepen
+            // toward the hem and travel with the sim. Three incommensurate
+            // frequencies so the two skirts never fold identically even
+            // though they share a formula.
             const fold =
-                0.118 * Math.sin(a * 7 + 0.6) +
-                0.055 * Math.sin(a * 12 + 2.1) +
-                0.026 * Math.sin(a * 19 + 4.4);
+                0.100 * Math.sin(a * 5 + 0.6 + side * 3.1) +
+                0.048 * Math.sin(a * 9 + 2.1) +
+                0.022 * Math.sin(a * 14 + 4.4);
             const pleat = 1 + f * fold;
 
-            // ca = +1 at the front, -1 at the back. The hem hangs *lowest* at
-            // the crest of a fold, where there is most fabric to hang — in
-            // phase with the pleat it produced a row of hard spikes instead.
-            //
-            // Cut high at the front and long at the back. Ankle length all the
-            // way round hides the boots, and with the boots hidden the entire
-            // foot-planting solve is invisible.
-            const hemY = 0.300 + 0.200 * ca - 0.048 * Math.sin(a * 7 + 0.6);
+            // Mid-thigh at the longest point, clearing the knee at both
+            // seams — short enough that a sprint or a wall-run never catches
+            // it, unlike SNOWFLOW's ankle-length hem.
+            const hemY = 0.620 + 0.130 * ca - 0.040 * Math.sin(a * 5 + 0.6);
             const y = 0.990 + (hemY - 0.990) * v;
 
-            const rx = (0.158 + (0.345 - 0.158) * f) * pleat;
-            const rz = (0.128 + (0.318 - 0.128) * f * (1 - 0.12 * ca)) * pleat;
+            const rx = (0.158 + (0.300 - 0.158) * f) * pleat;
+            const rz = (0.128 + (0.280 - 0.128) * f) * pleat;
 
             const o = (j * p.cols + i) * 3;
             p.bindPos[o] = rx * sa;
@@ -192,10 +207,12 @@ function makeRobe() {
 }
 
 /**
- * The over-mantle: a short cape that clears the shoulders and falls to the
- * small of the back. Its job is to break up the vertical line of the robe and
- * to catch the light on the shoulders, which is the read that says "layered"
- * from fifteen metres.
+ * The shoulder wrap: a short cape clearing the shoulders and falling only to
+ * the small of the back — SNOWFLOW's over-mantle, shortened and retuned
+ * rather than redesigned, since a closed ring this short already reads as
+ * "layered outerwear" without blocking leg movement (item 19 only rules out
+ * long, restrictive skirts, not a short torso wrap). Stays `closed: true`,
+ * the one garment panel that still is.
  */
 function makeMantle() {
     const p = new ClothPanel({
@@ -206,7 +223,7 @@ function makeMantle() {
         collide: C_TORSO | C_ARM_L | C_ARM_R,
     });
 
-    const RATE = [Infinity, 40, 12, 4, 1.5, 0.8, 0.45];
+    const RATE = [Infinity, 34, 10, 3.4, 1.3, 0.7, 0.4];
     // The collar has to clear the torso it sits on: start it inside the
     // shoulders (0.176 across) and the top of the mantle only emerges at the
     // shoulder line, which reads as a flat plate bolted to the chest.
@@ -216,13 +233,11 @@ function makeMantle() {
         [0.55, 0.235, 0.196],
         [1.00, 0.246, 0.214],
     ];
-    // Stops around the elbow, so the sleeves and their fur cuffs stay visible
-    // below it. A mantle long enough to cover the forearms swallows the whole
-    // silhouette into one dark mass.
+    // Stops well above the elbow, so the forearm wraps stay visible below it.
     const YT = [
         [0.00, 1.442, 0],
-        [0.20, 1.352, 0],
-        [0.55, 1.220, 0],
+        [0.20, 1.372, 0],
+        [0.55, 1.290, 0],
         [1.00, 0.000, 0], // filled per column below
     ];
 
@@ -234,7 +249,7 @@ function makeMantle() {
             const sa = Math.sin(a), ca = Math.cos(a);
             // Front hangs shorter than the back, and the edge scallops with the
             // folds rather than cutting a clean arc.
-            YT[3][1] = 1.045 + 0.115 * ca + 0.035 * Math.sin(a * 7 + 1.4);
+            YT[3][1] = 1.195 + 0.095 * ca + 0.030 * Math.sin(a * 7 + 1.4);
             const y = curve(YT, v)[0];
             const pleat = 1 + v * (0.062 * Math.sin(a * 7 + 1.4) + 0.026 * Math.sin(a * 11 + 3.0));
 
@@ -251,68 +266,39 @@ function makeMantle() {
 }
 
 /**
- * A sleeve. Pinned tightly along the arm and genuinely loose only past the
- * wrist, where the cuff drapes. A fully free sleeve looks wonderful for about
- * four seconds and then slides off the elbow.
+ * The long scarf tail — a flat open strip, not a ring, welded at the throat
+ * and trailing free down the back. This is where wind response (item 11) is
+ * most legible: it barely stirs at rest and streams near-horizontal in a
+ * strong blow, using the same `S.windDirection`/`S.windStrength` the terrain
+ * and particles read, via the shared apparent-wind calculation in `update`.
  */
-function makeSleeve(side) {
-    const s = side === 0 ? -1 : 1;
+function makeScarfTail() {
     const p = new ClothPanel({
-        name: "sleeve" + side, cols: 10, rows: 8, matId: M_ROBE,
-        renderCols: 26, renderRows: 20,
-        weaveU: 0.46, weaveV: 0.66,
-        aoTop: 0.6, aoBottom: 0.5,
-        collide: side === 0 ? C_ARM_L : C_ARM_R,
+        name: "scarfTail", cols: 5, rows: 10, matId: M_TRIM,
+        renderCols: 10, renderRows: 26,
+        weaveU: 0.16, weaveV: 0.60,
+        aoTop: 0.5, aoBottom: 0.35,
+        collide: C_TORSO,
+        closed: false,
     });
 
-    const UP = [s * 0.185, 1.400, 0.000];
-    const EL = [s * 0.230, 1.123, 0.000];
-    const WR = [s * 0.243, 0.866, 0.016];
-
-    // Beyond the wrist, continuing the forearm's direction.
-    let dx = WR[0] - EL[0], dy = WR[1] - EL[1], dz = WR[2] - EL[2];
-    const dl = Math.hypot(dx, dy, dz);
-    dx /= dl; dy /= dl; dz /= dl;
-
-    // (segment, t, radius) per row. Segment 0 = upper arm, 1 = forearm,
-    // 2 = past the wrist.
-    const ROWS = [
-        [0, 0.00, 0.084], [0, 0.45, 0.076], [0, 1.00, 0.072],
-        [1, 0.40, 0.068], [1, 0.75, 0.064], [1, 1.00, 0.061],
-        [2, 0.045, 0.072], [2, 0.125, 0.098],
-    ];
-    const BONE = [
-        B_UPPER_L, B_UPPER_L, B_UPPER_L,
-        B_FORE_L, B_FORE_L, B_FORE_L, B_FORE_L, B_HAND_L,
-    ];
-    const BONE_R = [
-        B_UPPER_R, B_UPPER_R, B_UPPER_R,
-        B_FORE_R, B_FORE_R, B_FORE_R, B_FORE_R, B_HAND_R,
-    ];
-    const RATE = [Infinity, 50, 26, 40, 18, 9, 5, 1.2];
+    const RATE = [Infinity, Infinity, 14, 5, 2.2, 1.1, 0.6, 0.4, 0.3, 0.24];
+    const HW = 0.052; // half-width at the throat, narrowing toward the tip
 
     for (let j = 0; j < p.rows; j++) {
-        const [seg, t, r] = ROWS[j];
-        let cx, cy, cz;
-        if (seg === 0) {
-            cx = UP[0] + (EL[0] - UP[0]) * t;
-            cy = UP[1] + (EL[1] - UP[1]) * t;
-            cz = UP[2] + (EL[2] - UP[2]) * t;
-        } else if (seg === 1) {
-            cx = EL[0] + (WR[0] - EL[0]) * t;
-            cy = EL[1] + (WR[1] - EL[1]) * t;
-            cz = EL[2] + (WR[2] - EL[2]) * t;
-        } else {
-            cx = WR[0] + dx * t; cy = WR[1] + dy * t; cz = WR[2] + dz * t;
-        }
+        const v = j / (p.rows - 1);
+        // Hangs down the back and drifts slightly out and down at rest, so it
+        // clears the shoulder wrap instead of resting inside it.
+        const y = 1.360 - 0.520 * v - 0.10 * v * v;
+        const z = -0.05 - 0.10 * v;
+        const w = HW * (1 - 0.35 * v);
         for (let i = 0; i < p.cols; i++) {
-            const a = (i / p.cols) * Math.PI * 2;
+            const t = i / (p.cols - 1) - 0.5; // -0.5..0.5 across the width
             const o = (j * p.cols + i) * 3;
-            // The arm is near-vertical in the bind pose, so the ring lies in XZ.
-            p.bindPos[o] = cx + Math.sin(a) * r;
-            p.bindPos[o + 1] = cy;
-            p.bindPos[o + 2] = cz + Math.cos(a) * r;
-            p.bone[j * p.cols + i] = (side === 0 ? BONE : BONE_R)[j];
+            p.bindPos[o] = t * 2 * w;
+            p.bindPos[o + 1] = y;
+            p.bindPos[o + 2] = z;
+            p.bone[j * p.cols + i] = B_NECK;
             p.pinRate[j * p.cols + i] = RATE[j];
         }
     }
@@ -320,8 +306,16 @@ function makeSleeve(side) {
     return p;
 }
 
+// SNOWFLOW also simulated a pair of loose sleeve panels here. They are gone,
+// not merely renamed: the skinned body mesh's own upper-arm and forearm loft
+// in `build.js` already carries M_ROBE (see its "arms" section) and the
+// forearm-wrap fray band sits on top of that, so the arm was never bare
+// without them — removing the panels drops two solves and two draw-mesh
+// regions for zero visible loss, which is budget item 18 paying for the two
+// new coat-skirt panels above.
+
 export function makePanels() {
-    return [makeRobe(), makeMantle(), makeSleeve(0), makeSleeve(1)];
+    return [makeCoatSkirt(0), makeCoatSkirt(1), makeMantle(), makeScarfTail()];
 }
 
 // -----------------------------------------------------------------------------
@@ -409,10 +403,14 @@ export class ClothSolver {
         // fraction of gravity; at nineteen metres a second it is four times it,
         // which is what lays the robe out flat behind a surf run with no special
         // case anywhere.
+        // Dry desert cloth is lighter than SNOWFLOW's winter garments: more
+        // drag per unit wind, less velocity damping, so the same wind field
+        // visibly scales from a light stir to a full whip (item 11) instead
+        // of the heavier fabric's sluggish response.
         const wx = this._wind[0], wy = this._wind[1], wz = this._wind[2];
         const wmag = Math.hypot(wx, wy, wz);
-        const drag = 0.085 * wmag;
-        const damp = Math.pow(0.90, h * 60);
+        const drag = 0.13 * wmag;
+        const damp = Math.pow(0.88, h * 60);
         const h2 = h * h;
 
         for (let k = 0; k < n; k++) {
@@ -478,7 +476,7 @@ export class ClothSolver {
      * a hem cannot drag the waistband off the hips.
      */
     _distance(p, iteration) {
-        const { cols, rows, pos, restU, restV, restB, pinRate } = p;
+        const { cols, rows, pos, restU, restV, restB, pinRate, closed } = p;
         // Bending is solved softly and only on the later iterations. Solved hard
         // it fights the distance constraints and the garment goes stiff.
         const bendK = iteration >= ITERATIONS - 3 ? 0.22 : 0;
@@ -487,8 +485,11 @@ export class ClothSolver {
             for (let i = 0; i < cols; i++) {
                 const k = j * cols + i;
 
-                // around the ring
-                solveLink(pos, k, j * cols + ((i + 1) % cols), restU[k], pinRate, 1);
+                // Around the ring — skipped on an open panel's last column,
+                // which is a real free edge, not a seam back to column 0.
+                if (closed || i + 1 < cols) {
+                    solveLink(pos, k, j * cols + ((i + 1) % cols), restU[k], pinRate, 1);
+                }
                 // down the panel
                 if (j + 1 < rows) {
                     solveLink(pos, k, (j + 1) * cols + i, restV[k], pinRate, 1);
@@ -501,7 +502,7 @@ export class ClothSolver {
         }
     }
 
-    /** Push particles out of the body capsules and off the snow. */
+    /** Push particles out of the body capsules and off the sand. */
     _collide(p, fig) {
         const n = p.count;
         const pos = p.pos;
@@ -533,7 +534,7 @@ export class ClothSolver {
             }
         }
 
-        // The hem rides on the snow rather than through it. Only the bottom rows
+        // The hem rides on the sand rather than through it. Only the bottom rows
         // check, because that is the only place it can happen and `heightAt` is
         // a filtered lookup, not free.
         if (p.groundRows > 0) {

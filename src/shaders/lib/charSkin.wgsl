@@ -50,10 +50,18 @@ fn skinNormal(tex: texture_2d<f32>, idx: vec4f, wt: vec4f, n: vec3f) -> vec3f {
 
 // ------------------------------------------------------------- cloth sampling
 
-/// One simulated node. `u` wraps — every garment is a closed tube — and `v`
-/// clamps, because the top and bottom edges are real boundaries.
-fn clothNode(tex: texture_2d<f32>, rowBase: i32, cols: i32, rows: i32, i: i32, j: i32) -> vec3f {
-    let ii = (i % cols + cols) % cols;
+/// One simulated node. `v` always clamps — the top and bottom edges are real
+/// boundaries on every garment. `u` wraps only when the panel is a closed
+/// tube (`closed != 0`, e.g. the shoulder wrap); an open sheet — the split
+/// coat skirts, the scarf tail — clamps `u` too, because its last column is a
+/// genuine free edge, not a seam back to column 0.
+fn clothNode(tex: texture_2d<f32>, rowBase: i32, cols: i32, rows: i32, i: i32, j: i32, closed: i32) -> vec3f {
+    var ii: i32;
+    if (closed != 0) {
+        ii = (i % cols + cols) % cols;
+    } else {
+        ii = clamp(i, 0, cols - 1);
+    }
     let jj = clamp(j, 0, rows - 1);
     return textureLoad(tex, vec2i(ii, rowBase + jj), 0).xyz;
 }
@@ -96,9 +104,15 @@ struct ClothSample {
 fn sampleCloth(
     tex: texture_2d<f32>,
     rowBase: i32, cols: i32, rows: i32,
-    u: f32, v: f32
+    u: f32, v: f32, closed: i32
 ) -> ClothSample {
-    let gu = u * f32(cols);
+    // A closed tube has `cols` equal segments running all the way round; an
+    // open sheet has only `cols-1` segments between its `cols` particles,
+    // because there is no segment closing column `cols-1` back to column 0.
+    // Using the wrong divisor here would slide `u=1` off the last real
+    // particle on an open panel.
+    let cu = select(f32(cols - 1), f32(cols), closed != 0);
+    let gu = u * cu;
     let gv = v * f32(rows - 1);
     let fu = floor(gu);
     let fv = floor(gv);
@@ -118,7 +132,7 @@ fn sampleCloth(
         var rowP = vec3f(0.0);
         var rowD = vec3f(0.0);
         for (var i = 0; i < 4; i++) {
-            let q = clothNode(tex, rowBase, cols, rows, i0 + i, j0 + j);
+            let q = clothNode(tex, rowBase, cols, rows, i0 + i, j0 + j, closed);
             rowP += q * wu[i];
             rowD += q * du[i];
         }
