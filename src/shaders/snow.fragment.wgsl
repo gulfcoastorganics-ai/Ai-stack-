@@ -314,64 +314,57 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     ).z;
 
     // ------------------------------------------------------------- material
-    // Snow albedo sits in a narrow, high, slightly blue band. It is never 1.0:
-    // pushing albedo to white is what produces the blown-out clipped highlights
-    // that read as "untextured white blob" rather than as snow.
-    var albedo = vec3f(0.855, 0.885, 0.945);
-    var roughness = 0.62;
+    // SANDSTORM: sand albedo sits in a warm, mid-value ochre band, never
+    // pushed toward white — the same reasoning SNOWFLOW's snow used, just
+    // moved off the blue axis onto the amber one. Roughness starts much
+    // higher than the snow bake did: dry granular sand has no cohesive
+    // surface glaze, so it scatters light diffusely rather than sheening.
+    var albedo = vec3f(0.78, 0.62, 0.40);
+    var roughness = 0.82;
     var f0 = vec3f(0.028);
-    var thickness = 1.0; // 1 = deep drift, 0 = thin crust
+    var thickness = 1.0; // 1 = loose deep sand, 0 = thin veneer over hardpan
 
-    // Compressed snow: denser, darker, tighter specular, scatters less.
-    albedo = mix(albedo, vec3f(0.62, 0.665, 0.755), compression * 0.85);
-    roughness = mix(roughness, 0.34, compression);
+    // Packed / trodden sand: denser, darker, tighter specular, scatters less.
+    albedo = mix(albedo, vec3f(0.58, 0.45, 0.28), compression * 0.85);
+    roughness = mix(roughness, 0.55, compression);
     thickness = mix(thickness, 0.35, compression);
 
-    // Refrozen ice: smooth and genuinely reflective.
-    albedo = mix(albedo, vec3f(0.42, 0.56, 0.70), iceAmount * 0.8);
-    roughness = mix(roughness, 0.07, iceAmount);
-    f0 = mix(f0, vec3f(0.045), iceAmount);
+    // Sun-baked crust (caliche / cemented sand): smoother and paler than the
+    // loose grain around it, the desert analogue of SNOWFLOW's refrozen ice
+    // channel — still a hardened surface state, just no longer reflective.
+    albedo = mix(albedo, vec3f(0.72, 0.60, 0.42), iceAmount * 0.8);
+    roughness = mix(roughness, 0.38, iceAmount);
+    f0 = mix(f0, vec3f(0.03), iceAmount);
     thickness = mix(thickness, 0.15, iceAmount);
 
-    // Exposed rock. Snow keeps its grip on the flatter faces, so the mask is
-    // gated by slope rather than applied flat.
+    // Exposed rock — weathered desert sandstone. Sand keeps its grip on the
+    // flatter faces, so the mask is gated by slope rather than applied flat.
     let rockExposed = rockMask * smoothstep(0.32, 0.66, 1.0 - N.y);
     if (rockExposed > 0.001) {
         let rn = noise2(world.xz * 2.3) * 0.5 + 0.5;
-        let rockCol = mix(vec3f(0.055, 0.058, 0.068), vec3f(0.115, 0.112, 0.118), rn);
+        let rockCol = mix(vec3f(0.30, 0.19, 0.13), vec3f(0.46, 0.32, 0.21), rn);
         albedo = mix(albedo, rockCol, rockExposed);
-        roughness = mix(roughness, 0.85, rockExposed);
+        roughness = mix(roughness, 0.88, rockExposed);
         thickness = mix(thickness, 0.0, rockExposed);
     }
 
-    // --- carved-snow surface state -----------------------------------------
-    // Freshly displaced mass is the opposite of trodden snow: it has just been
-    // broken up and thrown, so it is loose, bright and rough. Without this the
-    // berms shade identically to the trench and the whole trail flattens into
-    // one grey smear.
+    // --- carved-sand surface state ------------------------------------------
+    // Freshly displaced mass is the opposite of settled sand: it has just been
+    // thrown and has not had time to pack, so it is loose, brighter and rougher
+    // than the field around it. Without this the berms shade identically to
+    // the trench and the whole trail flattens into one flat tan smear.
     //
-    // Both numbers here must not make carved snow *less blue*, which is the one
-    // axis this material cannot afford to lose. Drain the cool cast out of a
-    // heavily worked patch and it reads as bare ground even while its luminance
-    // goes up — a warm-grey patch surrounded by blue-white snow is not snow.
-    //
-    //  1. The loose colour was a *whiter* white — B/R 1.078 against snow's 1.105
-    //     — so brightening toward it desaturated. It is now brighter than snow in
-    //     every channel and very slightly bluer, which is also the truer answer:
-    //     freshly broken snow has more surface per unit volume and scatters more,
-    //     and snow's scattering is what its blue comes from.
-    //  2. Roughness at 0.78 cut the ambient sky specular, through both the
-    //     roughness-dependent Fresnel and a blurrier mip. That term is one of the
-    //     bluest things in the frame, and a berm loses it exactly where the eye
-    //     is comparing it against snow that still has it. Loose snow is still
-    //     rougher than packed — it should be — just not by enough to strip the
-    //     sky out of it.
+    // Both numbers here must not make carved sand *less saturated* — a
+    // washed-out grey-tan patch surrounded by warm sand reads as dust, not as
+    // freshly turned grain. Loose sand exposes more grain surface per unit
+    // volume than settled sand, so it is both brighter and slightly more
+    // saturated toward the same ochre, not toward white.
     if (deformBerm > 0.002) {
         let loose = clamp(deformBerm * 5.0, 0.0, 1.0);
-        albedo = mix(albedo, vec3f(0.895, 0.920, 0.965), loose * 0.55);
-        roughness = mix(roughness, 0.78, loose * 0.7);
+        albedo = mix(albedo, vec3f(0.88, 0.70, 0.46), loose * 0.55);
+        roughness = mix(roughness, 0.90, loose * 0.7);
         thickness = mix(thickness, 1.0, loose * 0.6);
-        // Broken snow has crystal faces pointing everywhere, which is where the
+        // Broken sand throws grains at every facet angle, which is where the
         // chunky granular read at a trail edge actually comes from.
         let chunk = noise2(world.xz * 34.0) * 0.5 + 0.5;
         albedo *= 1.0 - loose * 0.10 * chunk;

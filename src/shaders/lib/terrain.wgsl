@@ -1,6 +1,13 @@
 // -----------------------------------------------------------------------------
 // snowTerrain — the landform.
 //
+// SANDSTORM note: this landform was already wind-sculpted dune geometry in
+// SNOWFLOW — broad transverse ridges, a long swell, sheltered lee-face drifts,
+// all anisotropic about a prevailing wind. It is carried over unchanged for
+// the terrain/material conversion step; only the ground material above it
+// (`snow.fragment.wgsl`) has been recoloured for sand. Wavelength/amplitude
+// retuning for a distinct dune-field identity is deferred to its own step.
+//
 // Split into two halves that live in different places at runtime:
 //
 //   terrainMacro()  broad dunes + medium drifts. Tens of metres down to about a

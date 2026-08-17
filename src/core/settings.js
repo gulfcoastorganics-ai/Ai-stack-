@@ -43,10 +43,14 @@ export const S = {
     /** Strength of the volumetric shafts spilling past dune crests. */
     shaftStrength: 0.30,
 
-    // ------------------------------------------------------------------- snow
-    glintIntensity: 0.55,
+    // ------------------------------------------------------------------- sand
+    // Sand grains sparkle far less than ice crystals (mostly quartz/mica
+    // flecks rather than facets), and dry granular sand barely transmits
+    // light at all, so both defaults sit well below SNOWFLOW's snow values.
+    // Structurally still the same tunables — only the resting point changed.
+    glintIntensity: 0.22,
     glintGrazing: 0.72, // how hard the grazing-angle gate bites
-    sssStrength: 1.0,
+    sssStrength: 0.15,
     sssRadius: 1.0,
     detailNormalStrength: 1.0,
     macroHeightScale: 1.0,
@@ -142,15 +146,15 @@ export const SCHEMA = [
         ],
     },
     {
-        group: "Snow",
+        group: "Sand",
         items: [
             { k: "glintIntensity", l: "Glint", t: "f", min: 0, max: 2, step: 0.01 },
             { k: "glintGrazing", l: "Glint gate", t: "f", min: 0, max: 1, step: 0.01 },
-            { k: "sssStrength", l: "SSS strength", t: "f", min: 0, max: 3, step: 0.01 },
-            { k: "sssRadius", l: "SSS radius", t: "f", min: 0.1, max: 3, step: 0.01 },
+            { k: "sssStrength", l: "Translucency", t: "f", min: 0, max: 3, step: 0.01 },
+            { k: "sssRadius", l: "Translucency radius", t: "f", min: 0.1, max: 3, step: 0.01 },
             { k: "detailNormalStrength", l: "Detail normals", t: "f", min: 0, max: 2, step: 0.01 },
             { k: "macroHeightScale", l: "Dune height", t: "f", min: 0, max: 2, step: 0.01 },
-            { k: "sastrugiStrength", l: "Sastrugi", t: "f", min: 0, max: 2, step: 0.01 },
+            { k: "sastrugiStrength", l: "Ripple strength", t: "f", min: 0, max: 2, step: 0.01 },
         ],
     },
     {
