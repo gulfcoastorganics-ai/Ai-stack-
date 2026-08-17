@@ -203,6 +203,7 @@ export class Overlay {
         this._mkNum(loco, "locoYaw", "facing / cam yaw");
         this._mkNum(loco, "locoSurf", "surf");
         this._mkNum(loco, "locoAction", "dash cd / air dash");
+        this._mkNum(loco, "locoJump", "sand step");
 
         // -------------------------------------------------------- presets
         const ph = document.createElement("h2");
@@ -456,6 +457,7 @@ export class Overlay {
             this._txt(r.locoYaw, "—");
             this._txt(r.locoSurf, "—");
             this._txt(r.locoAction, "—");
+            this._txt(r.locoJump, "—");
             return;
         }
 
@@ -474,6 +476,10 @@ export class Overlay {
             r.locoAction,
             (c._dashCooldownT > 0 ? c._dashCooldownT.toFixed(2) + "s" : "ready") +
             "  " + (c.airDashUsed ? "used" : "ready")
+        );
+        this._txt(
+            r.locoJump,
+            c.grounded ? "grounded" : c.jumpCount <= 1 ? "ready" : "used"
         );
     }
 

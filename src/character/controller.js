@@ -173,6 +173,8 @@ export class CharacterController {
         this.airDashUsed = false;
         /** One frame true on the frame a Sand Step fires. */
         this.sandStepFired = false;
+        /** One frame true on the frame the primary (grounded/coyote) jump fires. */
+        this.jumpFired = false;
 
         // ------------------------------------------------------- Phase 7: dash
         this.dashing = false;
@@ -221,6 +223,7 @@ export class CharacterController {
         this.justLanded = false;
         this.dashFired = false;
         this.sandStepFired = false;
+        this.jumpFired = false;
         this.hardCut = false;
 
         if (this._coyoteT > 0) this._coyoteT -= h;
@@ -498,6 +501,7 @@ export class CharacterController {
             this.airTime = 0;
             this.dashing = false;
             this.evading = false;
+            this.jumpFired = true;
             return;
         }
 

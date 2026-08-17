@@ -47,6 +47,11 @@ const SURF_ELONG = 2.6;
 const DASH_WIDTH = 0.16;
 const DASH_ELONG = 3.4;
 
+/** Reference ground speed a jump launch's kick scales against, m/s — a
+ *  fixed read of "how fast counts as fast" for this one effect, same spirit
+ *  as `_kick`'s own hardcoded speed terms below, not a live settings tunable. */
+const JUMP_LAUNCH_SPEED_REF = 7.2;
+
 export class SnowContact {
     /**
      * @param {import("./controller.js").CharacterController} character
@@ -94,6 +99,7 @@ export class SnowContact {
         // itself. Grounded-only by construction: `_walk`/`_surf` below are
         // gated the same way, and none of these fire while genuinely
         // airborne (a dash mid-air gets its own, much lighter, trail).
+        if (ch.jumpFired) this._jumpLaunch();
         if (ch.dashFired) this._dashLaunch(ch.dashKind === 1);
         if (ch.dashing) this._dashTrail(dt);
         if (ch.hardCut) this._hardCutSpray();
@@ -203,6 +209,45 @@ export class SnowContact {
     }
 
     // ----------------------------------------------------------- Phase 7
+
+    /**
+     * The instant the primary jump fires: a shallow compression under both
+     * feet plus a light, mostly-vertical kick of grain — the push-off read,
+     * distinct from a dash's dig-in (lateral, aggressive) and a Sand Step's
+     * ring (a fast-fading burst with no ground contact at all, since there
+     * is nothing solid under the foot by then). Scaled by how hard the
+     * character was already moving, so a standing jump barely marks the
+     * ground while a running crest-leap throws a visible little cloud.
+     */
+    _jumpLaunch() {
+        const ch = this.character;
+        const x = ch.position.x, y = ch.position.y, z = ch.position.z;
+        const k = Math.min(1, ch.speed / JUMP_LAUNCH_SPEED_REF);
+
+        this.field.brush(
+            x, z, 0.22 + 0.06 * k,
+            0.05 + 0.03 * k, 0.05 + 0.05 * k, 0.6, 0,
+            ch.facing, 1.3, 0.9
+        );
+
+        const sp = this.spray;
+        if (!sp) return;
+        const n = 8 + ((k * 14) | 0);
+        for (let i = 0; i < n; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const r = 0.05 + Math.random() * 0.16;
+            const ca = Math.cos(a), sa = Math.sin(a);
+            sp.emit(
+                x + ca * r, y + 0.03, z + sa * r,
+                ca * (0.6 + Math.random() * 1.1) + ch.velocity.x * 0.15,
+                1.1 + Math.random() * 1.6,
+                sa * (0.6 + Math.random() * 1.1) + ch.velocity.z * 0.15,
+                0.010 + Math.random() * 0.014,
+                0.4 + Math.random() * 0.35,
+                0
+            );
+        }
+    }
 
     /**
      * The instant a dash fires: a compressed launch patch under the feet,
