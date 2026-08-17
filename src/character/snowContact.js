@@ -42,6 +42,11 @@ const BOOT_ELONG = 1.7;
 const SURF_WIDTH = 0.30;
 const SURF_ELONG = 2.6;
 
+/** Dash streak geometry, metres — narrower and far more elongated than a
+ *  boot print, so it reads as a scored line rather than a smeared footpath. */
+const DASH_WIDTH = 0.16;
+const DASH_ELONG = 3.4;
+
 export class SnowContact {
     /**
      * @param {import("./controller.js").CharacterController} character
@@ -83,8 +88,24 @@ export class SnowContact {
         this._prevX = ch.position.x;
         this._prevZ = ch.position.z;
 
-        if (ch.surf > 0.02) this._surf(dt, moved);
-        if (ch.surf < 0.98) this._walk(dt, moved);
+        // ---- Phase 7 traversal signatures ---------------------------------
+        // Every one of these reads a flag the controller already computed —
+        // see `controller.js`'s class doc on why it never writes a brush
+        // itself. Grounded-only by construction: `_walk`/`_surf` below are
+        // gated the same way, and none of these fire while genuinely
+        // airborne (a dash mid-air gets its own, much lighter, trail).
+        if (ch.dashFired) this._dashLaunch(ch.dashKind === 1);
+        if (ch.dashing) this._dashTrail(dt);
+        if (ch.hardCut) this._hardCutSpray();
+        if (ch.sandStepFired) this._sandStep();
+        if (ch.justLanded) this._landing();
+
+        // Both gated on `grounded`: a surf blend that is still easing down
+        // (or never eased down at all — see `controller.js`'s note on why
+        // the blend survives a jump) must not keep gouging a groove into
+        // thin air while the character is actually flying over the dune.
+        if (ch.surf > 0.02 && ch.grounded) this._surf(dt, moved);
+        if (ch.surf < 0.98 && ch.grounded && !ch.dashing && !ch.evading) this._walk(dt, moved);
 
         // Footfalls fire regardless of mode; the gait suppresses them while
         // surfing because the feet are on the board.
@@ -176,6 +197,180 @@ export class SnowContact {
                 -fz * back + rz * 1.3 + ch.velocity.z * 0.25,
                 clod ? 0.011 + Math.random() * 0.010 : 0.015 + Math.random() * 0.022,
                 clod ? 0.55 + Math.random() * 0.35 : 0.55 + Math.random() * 0.60,
+                clod
+            );
+        }
+    }
+
+    // ----------------------------------------------------------- Phase 7
+
+    /**
+     * The instant a dash fires: a compressed launch patch under the feet,
+     * plus a burst of grain thrown laterally off both sides — the "dig in
+     * and go" read the phase brief asks for. An air dash gets a lighter
+     * version: no ground brush (there is no ground under it), just a
+     * scatter of grains flung from around the character to sell the impulse.
+     * @param {boolean} grounded true for a ground dash, false for an air dash
+     */
+    _dashLaunch(grounded) {
+        const ch = this.character;
+        const sp = this.spray;
+        const x = ch.position.x, y = ch.position.y, z = ch.position.z;
+        const dx = ch.dashDirX, dz = ch.dashDirZ;
+
+        if (grounded) {
+            // Same (x, z) yaw convention every other brush call in this file
+            // uses — `ch.facing` is already the dash direction by the time
+            // this fires, since the controller snaps facing to it on launch.
+            this.field.brush(
+                x, z, 0.30,
+                0.16, 0.10, 0.85, 0,
+                ch.facing, 1.2, 1.0
+            );
+        }
+
+        if (!sp) return;
+        // Perpendicular to the dash — a launch throws grain sideways off the
+        // dig-in, not forward along the direction of travel.
+        const px = -dz, pz = dx;
+        const n = grounded ? 46 : 30;
+        for (let k = 0; k < n; k++) {
+            const side = Math.random() < 0.5 ? -1 : 1;
+            const out = 1.2 + Math.random() * 2.6;
+            const up = grounded ? 0.8 + Math.random() * 2.0 : 0.5 + Math.random() * 1.2;
+            const clod = Math.random() < 0.24 ? 1 : 0;
+            sp.emit(
+                x + px * side * 0.12, y + 0.05 + Math.random() * 0.15, z + pz * side * 0.12,
+                px * side * out - dx * 1.5, up, pz * side * out - dz * 1.5,
+                clod ? 0.020 + Math.random() * 0.022 : 0.012 + Math.random() * 0.016,
+                0.5 + Math.random() * 0.5,
+                clod
+            );
+        }
+    }
+
+    /**
+     * The thin streak scored while a dash is actively travelling — a much
+     * narrower, more elongated mark than the walking scuff, and it only
+     * writes while `dashing` is true so it stops the instant the burst ends
+     * rather than trailing off gradually. Grounded dashes only: an air
+     * dash's trail is a particle effect, handled by the ability-style spray
+     * in `_dashLaunch`/the figure's own wind response, not a ground mark.
+     */
+    _dashTrail(dt) {
+        const ch = this.character;
+        if (!ch.grounded || ch.speed < 1) return;
+        this.field.brush(
+            ch.position.x, ch.position.z,
+            DASH_WIDTH,
+            0.10, 0.06, 0.9, 0,
+            ch.facing, DASH_ELONG, 0.7
+        );
+    }
+
+    /**
+     * Lateral sand spray on a hard directional cut — the phase brief's "on a
+     * hard 90-degree cut... lateral sand spray is generated" and "on a 180
+     * reversal... deeper sand disturbance." One shot, fired the same frame
+     * the controller flags the cut, scaled by how sharp it was.
+     */
+    _hardCutSpray() {
+        const ch = this.character;
+        const sp = this.spray;
+        const k = ch.cutStrength;
+
+        // A short skid scar under the pivoting foot.
+        this.field.brush(
+            ch.position.x, ch.position.z,
+            0.16 + 0.10 * k,
+            0.10 * k, 0.14 * k, 0.7, 0,
+            ch.facing, 1.8, 1.0
+        );
+
+        if (!sp) return;
+        const fx = Math.sin(ch.facing), fz = Math.cos(ch.facing);
+        // Perpendicular to the *new* facing — a plant throws grain out to
+        // both sides of the direction just committed to, not straight back.
+        const px = -fz, pz = fx;
+        const n = 10 + ((k * 24) | 0);
+        for (let i = 0; i < n; i++) {
+            const side = Math.random() < 0.5 ? -1 : 1;
+            const out = (1.0 + Math.random() * 2.4) * (0.5 + 0.5 * k);
+            sp.emit(
+                ch.position.x + px * side * 0.1, ch.position.y + 0.04, ch.position.z + pz * side * 0.1,
+                px * side * out, 0.6 + Math.random() * 1.4, pz * side * out,
+                0.010 + Math.random() * 0.016,
+                0.4 + Math.random() * 0.4,
+                0
+            );
+        }
+    }
+
+    /**
+     * Sand Step: the expanding ring of grain under the foot at the moment of
+     * the aerial second jump — the visual explanation for where the extra
+     * impulse came from. A shallow, wide, fast-fading brush (mass barely
+     * displaced, since the foot never really contacted anything solid) plus
+     * a burst of grains in a genuine ring rather than a random scatter.
+     */
+    _sandStep() {
+        const ch = this.character;
+        const x = ch.position.x, y = ch.position.y, z = ch.position.z;
+
+        this.field.brush(x, z, 0.5, 0, 0.05, 0.1, 0, ch.facing, 1.1, 1.0);
+
+        const sp = this.spray;
+        if (!sp) return;
+        const n = 34;
+        for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2 + Math.random() * 0.2;
+            const r = 0.15 + Math.random() * 0.15;
+            const ca = Math.cos(a), sa = Math.sin(a);
+            sp.emit(
+                x + ca * r, y + 0.03, z + sa * r,
+                ca * (1.6 + Math.random() * 1.4), 1.0 + Math.random() * 1.6, sa * (1.6 + Math.random() * 1.4),
+                0.010 + Math.random() * 0.014,
+                0.35 + Math.random() * 0.3,
+                0
+            );
+        }
+    }
+
+    /**
+     * Landing: centre compression, an outward granular puff, and a subtle
+     * ring in the terrain state buffer, all scaled by `landImpact`. A soft
+     * landing barely marks the ground at all; a hard one from a real height
+     * visibly displaces a wide patch.
+     */
+    _landing() {
+        const ch = this.character;
+        const k = ch.landImpact;
+        if (k < 0.02) return;
+        const x = ch.position.x, y = ch.position.y, z = ch.position.z;
+
+        this.field.brush(
+            x, z,
+            0.28 + 0.30 * k,
+            0.08 + 0.18 * k,
+            0.06 + 0.16 * k,
+            0.9,
+            0,
+            ch.facing, 1.15, 1.0
+        );
+
+        const sp = this.spray;
+        if (!sp) return;
+        const n = 10 + ((k * 40) | 0);
+        for (let i = 0; i < n; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const r = Math.random() * (0.25 + 0.5 * k);
+            const ca = Math.cos(a), sa = Math.sin(a);
+            const clod = Math.random() < 0.2 * k ? 1 : 0;
+            sp.emit(
+                x + ca * r, y + 0.03, z + sa * r,
+                ca * (1.0 + Math.random() * 2.5 * k), 0.6 + Math.random() * 2.2 * k, sa * (1.0 + Math.random() * 2.5 * k),
+                clod ? 0.022 + Math.random() * 0.024 : 0.012 + Math.random() * 0.018,
+                0.5 + Math.random() * 0.6,
                 clod
             );
         }

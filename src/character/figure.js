@@ -82,6 +82,19 @@ const FORE_LEN = 0.26;
 /** Pelvis height above the feet in the bind pose. */
 const HIP_HEIGHT = 0.95;
 
+/**
+ * Speed the pose blends normalise "how much run" against, 0..1. Phase 7
+ * raised the controller's actual speed tiers (`settings.js`'s
+ * `moveRunSpeed`/`moveSprintSpeed`, ~6.5/10 m/s by default) well past
+ * SNOWFLOW's single 5.4 m/s reference, so a pose blend still keyed to 5.4
+ * would sit fully saturated the moment the character left a walk — leaving
+ * sprint with no extra visual intensity over a run. Not read from
+ * `settings.js` directly: this is a fixed normalisation range for how the
+ * *pose* grades in, not a live gameplay tunable, and the two are allowed to
+ * drift apart.
+ */
+const RUN_NORM = 9.0;
+
 // ------------------------------------------------------- module-scope scratch
 const _axes = new Float32Array(9);   // X, Y, Z of a composed basis
 const _p = new Float32Array(3);
@@ -220,6 +233,17 @@ export class Figure {
         /** How far the figure has settled into the snow, metres. */
         this.sink = 0.04;
 
+        // --------------------------------------------------- Phase 7: pose kicks
+        // Both are one-shot decaying values rather than states: something
+        // sets them at most as high as they already are (`Math.max`), and
+        // they ease back to zero on their own every frame after. Neither
+        // gates input or movement — see `controller.js`'s note on why the
+        // gameplay layer never waits on the body's presentation of it.
+        /** Extra crouch depth from a landing, decaying. */
+        this._landDip = 0;
+        /** Extra bank/lean from a hard directional cut, decaying. */
+        this._cutKick = 0;
+
         this._t = 0;
         this._prevGait = 0;
     }
@@ -235,7 +259,7 @@ export class Figure {
 
         const surf = ch.surf;
         const speed = ch.speed;
-        const run = Math.min(1, speed / 5.4);
+        const run = Math.min(1, speed / RUN_NORM);
 
         // ---------------------------------------------------------- footfalls
         // Stance/swing is derived from the same distance-driven phase the
@@ -244,6 +268,19 @@ export class Figure {
         this._updateFeet(h, ch);
 
         // -------------------------------------------------------- body attitude
+        //
+        // Phase 7 pose kicks — set at most once a frame by the event that
+        // caused them, decayed every frame regardless. `_landDip` deepens the
+        // crouch below; `_cutKick` sharpens the bank a hard cut already
+        // produces through `ch.lean` (see the roll term) rather than
+        // replacing it with a separate mechanism.
+        if (ch.justLanded) this._landDip = Math.max(this._landDip, ch.landImpact);
+        this._landDip = damp(this._landDip, 0, 5, h);
+        if (ch.hardCut) this._cutKick = Math.max(this._cutKick, ch.cutStrength);
+        this._cutKick = damp(this._cutKick, 0, 8, h);
+
+        const grounded = ch.grounded;
+
         // Lean forward with speed, and *into* acceleration — the classic read
         // that a figure is pushing rather than being dragged.
         const fwdAcc =
@@ -252,24 +289,36 @@ export class Figure {
         // order of magnitude larger than anything walking produces: letting go at
         // top speed decelerates at 30 m/s^2, which unclamped throws the torso
         // twenty degrees backwards and reads as a fall rather than as a scrub.
+        //
+        // Airborne, the same pitch term instead answers vertical velocity:
+        // rising leans back a little, falling leans forward in anticipation
+        // of landing — clamped tight, since this is attitude, not a diving
+        // animation. A dash adds its own forward commitment on top.
+        const airPitch = grounded ? 0 : -clamp(ch.verticalVelocity * 0.015, -0.12, 0.12);
+        const dashPitch = ch.dashing && ch.dashKind === 1 ? 0.20 : ch.dashing ? 0.10 : 0;
         const pitchWant =
             0.10 * run
             + 0.012 * clamp(fwdAcc, -9, 22)
-            + surf * (0.30 + 0.16 * ch.speed01);
+            + surf * (0.30 + 0.16 * ch.speed01)
+            + airPitch + dashPitch;
         this.pitch = damp(this.pitch, pitchWant, 7, h);
 
-        const rollWant = ch.lean * (0.16 + 0.34 * surf);
+        const rollWant = ch.lean * (0.16 + 0.34 * surf) * (1 + this._cutKick * 0.8);
         this.roll = damp(this.roll, rollWant, 8, h);
 
         // Vertical bob: the pelvis drops through each stance and rises over the
-        // supporting leg, twice per stride. Suppressed while surfing, where the
-        // stance is a static crouch.
+        // supporting leg, twice per stride. Suppressed while surfing or
+        // airborne, where the stance is a static crouch or there is no stance
+        // at all.
         const bobWant =
-            (1 - surf) * (-0.028 * run * (0.5 - 0.5 * Math.cos(4 * Math.PI * ch.gaitPhase)));
+            grounded && surf < 0.5
+                ? -0.028 * run * (0.5 - 0.5 * Math.cos(4 * Math.PI * ch.gaitPhase))
+                : 0;
         this.bob = damp(this.bob, bobWant, 18, h);
 
-        // Crouch: a little at running speed, a lot on the board.
-        const crouch = 0.035 * run + surf * (0.13 + 0.05 * ch.speed01);
+        // Crouch: a little at running speed, a lot on the board, more still
+        // for a beat after a hard landing — `_landDip` above.
+        const crouch = 0.035 * run + surf * (0.13 + 0.05 * ch.speed01) + this._landDip * 0.24;
         this.hipY = damp(this.hipY, HIP_HEIGHT - crouch, 9, h);
 
         // The figure settles into the snow it is standing on. Reading the real
@@ -280,15 +329,24 @@ export class Figure {
         // ------------------------------------------------------------- spine
         const gx = ch.position.x;
         const gz = ch.position.z;
+        // The actual terrain height under the character, independent of
+        // whether they are standing on it right now — exposed for the
+        // material shader's procedural weathering (dust accumulation near
+        // the boots, sun bleaching up high, both measured as height *above
+        // the ground*, which is exactly as meaningful in the air as on it).
         const groundY = this.terrain.heightAt(gx, gz);
-        // Exposed for the material shader's procedural weathering (dust
-        // accumulation near the boots, sun bleaching up high) — see
-        // `character.js`'s `groundY` uniform. Not otherwise used by anything
-        // in this file; storing it here is the only change, no pose/gait
-        // logic is touched.
         this.groundY = groundY;
 
-        const rootY = groundY - this.sink + this.hipY + this.bob;
+        // Phase 7: the root now rides `ch.position.y` itself rather than
+        // re-deriving a ground height and assuming the character is on it.
+        // `position.y` already *is* the correct number in both regimes — see
+        // `controller.js`'s `_integrateVertical` — grounded, it is the
+        // terrain height (softly snapped); airborne, it is real integrated
+        // flight. Before Phase 7 those were the same value on every frame by
+        // construction, since nothing could leave the ground; now they are
+        // not, and using the wrong one is the single change that would make
+        // every jump, dash-launch and Sand Step invisible.
+        const rootY = ch.position.y - this.sink + this.hipY + this.bob;
 
         composeBasis(ch.facing, this.pitch, this.roll);
         const rX = _axes[0], rY = _axes[1], rZ = _axes[2];
@@ -370,7 +428,7 @@ export class Figure {
     _updateFeet(h, ch) {
         const surf = ch.surf;
         const speed = ch.speed;
-        const run = Math.min(1, speed / 5.4);
+        const run = Math.min(1, speed / RUN_NORM);
         // Duty factor: a walk keeps both feet down for a moment, a run has a
         // flight phase. Interpolating between them is what makes the transition
         // from walk to run read as a gait change and not a speed change.
@@ -445,8 +503,13 @@ export class Figure {
         }
 
         // Surfing: both feet ride the board, offset along the body's long axis
-        // and rotated across the direction of travel. Blended in, never snapped.
-        if (surf > 0.001) {
+        // and rotated across the direction of travel. Blended in, never
+        // snapped. Gated on `grounded` — the surf blend itself deliberately
+        // survives a jump (see `controller.js`'s note on why), so without
+        // this gate a "surf → jump" would keep pulling the feet down onto a
+        // board-shaped position at *ground* height while the body is
+        // visibly airborne above it.
+        if (ch.grounded && surf > 0.001) {
             for (let f = 0; f < 2; f++) {
                 // Wide and staggered: feet apart across the direction of travel
                 // for lateral stability, with the leading foot a little ahead.
@@ -460,6 +523,25 @@ export class Figure {
                 this.footPos[o + 1] += (sy - this.footPos[o + 1]) * surf;
                 this.footPos[o + 2] += (sz - this.footPos[o + 2]) * surf;
                 this.footWeight[f] = Math.max(this.footWeight[f], surf);
+            }
+        } else if (!ch.grounded) {
+            // Airborne tuck: knees bend and the feet lift toward the hips
+            // instead of continuing to chase the last ground plant, which —
+            // now that `position.y` actually rises during a jump — would
+            // otherwise stretch the legs toward a point increasingly far
+            // below the body. Eases in over the first third of a second of
+            // air time rather than snapping the moment the ground leaves.
+            const tuck = clamp(ch.airTime * 3.0, 0, 1) * 0.55;
+            for (let f = 0; f < 2; f++) {
+                const lateral = f === 0 ? -0.12 : 0.12;
+                const tx = ch.position.x + rgtX * lateral * 1.3 + fwdX * 0.06;
+                const tz = ch.position.z + rgtZ * lateral * 1.3 + fwdZ * 0.06;
+                const ty = ch.position.y + 0.50 - tuck * 0.30;
+                const o = f * 3;
+                this.footPos[o] += (tx - this.footPos[o]) * tuck;
+                this.footPos[o + 1] += (ty - this.footPos[o + 1]) * tuck;
+                this.footPos[o + 2] += (tz - this.footPos[o + 2]) * tuck;
+                this.footWeight[f] = damp(this.footWeight[f], 0, 10, h);
             }
         }
     }
@@ -522,7 +604,7 @@ export class Figure {
      */
     _poseArms(h, ch, cx, cy, cz, rX, rY, rZ, uX, uY, uZ, fX, fY, fZ) {
         const surf = ch.surf;
-        const run = Math.min(1, ch.speed / 5.4);
+        const run = Math.min(1, ch.speed / RUN_NORM);
         const swing = Math.sin(2 * Math.PI * ch.gaitPhase) * (0.20 + 0.42 * run) * (1 - surf);
         // Slow idle drift so a standing figure is never perfectly still.
         const idle = Math.sin(this._t * 0.9) * 0.02 + Math.sin(this._t * 1.7 + 1.3) * 0.012;
@@ -631,7 +713,7 @@ export class Figure {
             }
 
             // ---- surf target: out, forward and a little down ----------------
-            if (surf > 0.001) {
+            if (ch.grounded && surf > 0.001) {
                 const carve = ch.carve;
                 // Trailing arm rises, leading arm drops into the turn — the
                 // same asymmetry a snowboarder holds through a carve.
@@ -642,6 +724,26 @@ export class Figure {
                 tx += (sx - tx) * surf;
                 ty += (sy - ty) * surf;
                 tz += (sz - tz) * surf;
+            }
+
+            // ---- air target: out and up for balance --------------------------
+            //
+            // Airborne, arms spread out to the sides rather than continuing
+            // whatever the walk swing was doing — a figure with no ground
+            // under it does not keep pumping its arms. Faded out by `cast`
+            // so an ability fired mid-air still reads as the ability, not a
+            // balance pose fighting it.
+            if (!ch.grounded) {
+                const air = clamp(ch.airTime * 4.0, 0, 1) * (1 - cast);
+                if (air > 0.001) {
+                    const rise = ch.verticalVelocity > 0 ? 0.16 : -0.06;
+                    const axp = _sh[0] + rX * (sgn * 0.36) + fX * 0.10 + uX * (0.12 + rise);
+                    const ayp = _sh[1] + rY * (sgn * 0.36) + fY * 0.10 + uY * (0.12 + rise);
+                    const azp = _sh[2] + rZ * (sgn * 0.36) + fZ * 0.10 + uZ * (0.12 + rise);
+                    tx += (axp - tx) * air;
+                    ty += (ayp - ty) * air;
+                    tz += (azp - tz) * air;
+                }
             }
 
             // Elbows point back and out.

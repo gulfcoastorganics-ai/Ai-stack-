@@ -10,6 +10,7 @@
 
 import { S, SCHEMA, set, applyPreset } from "../core/settings.js";
 import { stats, systemMs, FrameGraph, spikes, resetSpikes } from "../core/perf.js";
+import { input } from "../core/input.js";
 
 const CSS = `
 #ov {
@@ -185,6 +186,24 @@ export class Overlay {
         copy.textContent = "copy pose";
         copy.onclick = () => this._copyPose(copy);
         pb.appendChild(copy);
+
+        // ----------------------------------------------------- locomotion
+        // Phase 7 diagnostics — compact and optional (this whole panel is
+        // hidden until F1), refreshed on the same 100 Hz-gated camera timer
+        // rather than every frame. Not the normal HUD; nothing here shows
+        // unless the overlay itself is open.
+        const lh = document.createElement("h2");
+        lh.textContent = "Locomotion";
+        el.appendChild(lh);
+        const loco = document.createElement("div");
+        loco.className = "nums one cam";
+        el.appendChild(loco);
+        this._mkNum(loco, "locoState", "state / grounded");
+        this._mkNum(loco, "locoSpeed", "h-speed / v-speed");
+        this._mkNum(loco, "locoDesired", "desired speed");
+        this._mkNum(loco, "locoYaw", "facing / cam yaw");
+        this._mkNum(loco, "locoSurf", "surf");
+        this._mkNum(loco, "locoAction", "dash cd / air dash");
 
         // -------------------------------------------------------- presets
         const ph = document.createElement("h2");
@@ -420,8 +439,44 @@ export class Overlay {
             this._txt(r.chrMot, "—");
         }
 
+        this._updateLocomotion();
+
         this._pose = this._poseScript();
         this._txt(this.poseEl, this._pose);
+    }
+
+    /** Phase 7 locomotion diagnostics — same 100ms cadence as the camera block. */
+    _updateLocomotion() {
+        const c = this.character;
+        const rig = this.rig;
+        const r = this.readouts;
+        if (!c) {
+            this._txt(r.locoState, "—");
+            this._txt(r.locoSpeed, "—");
+            this._txt(r.locoDesired, "—");
+            this._txt(r.locoYaw, "—");
+            this._txt(r.locoSurf, "—");
+            this._txt(r.locoAction, "—");
+            return;
+        }
+
+        this._txt(r.locoState, c.state + (c.grounded ? " / grounded" : " / air " + c.airTime.toFixed(2) + "s"));
+        this._txt(r.locoSpeed, c.speed.toFixed(2) + " m/s  " + c.verticalVelocity.toFixed(2) + " m/s");
+        const desired = input.sprint ? S.moveSprintSpeed : S.moveRunSpeed;
+        this._txt(r.locoDesired, desired.toFixed(1) + " m/s");
+        this._txt(
+            r.locoYaw,
+            wrapDeg(c.facing * RAD).toFixed(0) + "°  " + (rig ? wrapDeg(rig.yaw * RAD).toFixed(0) + "°" : "—")
+        );
+        this._txt(
+            r.locoSurf,
+            c.surf.toFixed(2) + (c.dashing ? "  dash " + c.dashKind : "") + (c.evading ? "  evade" : "")
+        );
+        this._txt(
+            r.locoAction,
+            (c._dashCooldownT > 0 ? c._dashCooldownT.toFixed(2) + "s" : "ready") +
+            "  " + (c.airDashUsed ? "used" : "ready")
+        );
     }
 
     /** A one-liner that reproduces the current pose. Paste it into the console. */

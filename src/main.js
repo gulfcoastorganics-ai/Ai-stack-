@@ -228,8 +228,17 @@ async function boot() {
         contact.update(dt);
         const tChar = performance.now();
 
+        // Player-commanded recenter — set the target before the rig consumes
+        // it this same frame, so there is no one-frame lag on the press.
+        if (input.camResetPressed) rig.recenter(character.facing);
+        // Discrete-action camera responses — restrained per the phase's
+        // camera-effects table: a brief FOV pulse for a dash (smaller for an
+        // air dash), a low-frequency dip scaled by how hard the landing was.
+        if (character.dashFired) rig.pulseFov(character.dashKind === 2 ? 0.045 : 0.07);
+        if (character.justLanded) rig.addLandingImpulse(0.04 + 0.16 * character.landImpact);
+
         _vel.copyFrom(character.velocity);
-        rig.update(dt, character.position, _vel, character.lean, character.speed01);
+        rig.update(dt, character.position, _vel, character);
 
         // Jitters the projection and republishes everything the screen-space
         // passes derive from the camera. Must be after the rig has moved and
