@@ -33,14 +33,16 @@ export const input = {
     // once regardless of how long the key stays down and never has to
     // de-bounce a held key itself.
     /**
-     * Shift — jump while grounded (or within coyote time), or a Sand Step if
-     * already airborne. Edge-triggered on purpose: Shift is a discrete
-     * action button now, not a held movement modifier, and a controller that
-     * read `jumpHeld` for this would jump every single frame the key stayed
-     * down. See `jumpHeld` below for the (rarely needed) continuous state.
+     * Phase 8B: rebound from Shift back to Space — "Space is now the
+     * canonical jump control", Shift is not bound to jump at all. Space —
+     * jump while grounded (or within coyote time), or a Sand Step if already
+     * airborne. Edge-triggered on purpose: a discrete action button, not a
+     * held movement modifier, and a controller that read `jumpHeld` for this
+     * would jump every single frame the key stayed down. See `jumpHeld`
+     * below for the (rarely needed) continuous state.
      */
     jumpPressed: false,
-    /** @type {boolean} Shift currently held — continuous state, for anything
+    /** @type {boolean} Space currently held — continuous state, for anything
      *  that genuinely needs "is the button down" rather than "was it just
      *  pressed". The controller's own jump/Sand Step logic uses
      *  `jumpPressed`, not this. */
@@ -136,18 +138,20 @@ export function initInput(canvas, hooks) {
             return;
         }
 
-        const isShift = e.code === "ShiftLeft" || e.code === "ShiftRight";
-        // Shift is a discrete action button now (jump / Sand Step), not a
-        // held movement modifier — `jumpPressed` fires once per physical
-        // press regardless of how long the key stays down afterward, the
-        // same edge-triggered shape as the spell keys below. `jumpHeld`
-        // tracks the continuous state alongside it for anything that
-        // genuinely wants "is it down", but the controller's own jump logic
-        // deliberately does not read it — see the field's own doc comment on
-        // why a naive `if (shiftHeld) jump()` would fire every frame.
-        if (isShift) {
+        const isJumpKey = e.code === "Space";
+        // Space is the discrete action button (jump / Sand Step), not a held
+        // movement modifier — `jumpPressed` fires once per physical press
+        // regardless of how long the key stays down afterward, the same
+        // edge-triggered shape as the spell keys below. `jumpHeld` tracks the
+        // continuous state alongside it for anything that genuinely wants
+        // "is it down", but the controller's own jump logic deliberately
+        // does not read it — see the field's own doc comment on why a naive
+        // `if (spaceHeld) jump()` would fire every frame. Shift is not bound
+        // to jump at all — Phase 8B reverted the earlier control revision.
+        if (isJumpKey) {
             if (!e.repeat && input.locked) input.jumpPressed = true;
             input.jumpHeld = true;
+            if (input.locked) e.preventDefault(); // stop the page from scrolling
         }
 
         if (e.repeat) return;
@@ -170,11 +174,7 @@ export function initInput(canvas, hooks) {
     window.addEventListener("keyup", (e) => {
         keys[e.code] = false;
         if (SPELL_KEYS[e.code] === 2) input.spellHeld2 = false;
-        if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
-            // Only clear once *both* physical Shift keys are up, so tapping
-            // one while still holding the other does not read as released.
-            input.jumpHeld = !!(keys.ShiftLeft || keys.ShiftRight);
-        }
+        if (e.code === "Space") input.jumpHeld = false;
     });
 
     window.addEventListener("blur", () => {

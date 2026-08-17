@@ -243,6 +243,17 @@ export class Figure {
         this._landDip = 0;
         /** Extra bank/lean from a hard directional cut, decaying. */
         this._cutKick = 0;
+        /**
+         * Phase 8B jump anticipation/launch. A signed one-shot: driven
+         * negative (compressed) the instant `ch.jumpFired` fires, then
+         * springs up through zero to a brief positive (extended) peak before
+         * decaying — the "crouch, then snap straight" read of a real jump's
+         * anticipation-into-launch, compressed into a single decaying value
+         * since there is no pre-liftoff buffer to key a true anticipation
+         * beat off. Never gates input — same rule every other one-shot pose
+         * kick in this file follows.
+         */
+        this._launchKick = 0;
 
         this._t = 0;
         this._prevGait = 0;
@@ -279,10 +290,32 @@ export class Figure {
         if (ch.hardCut) this._cutKick = Math.max(this._cutKick, ch.cutStrength);
         this._cutKick = damp(this._cutKick, 0, 8, h);
 
+        // Phase 8B jump choreography: anticipation/compression into launch.
+        // `_launchT` is seconds since the last primary jump fired (a large
+        // number when idle); `_launchKick` is a deterministic three-segment
+        // curve driven off it — compress (0 -> -1), snap through to extend
+        // (-1 -> +1), decay back to neutral (+1 -> 0). This is the one beat
+        // the existing pose kicks didn't cover: `_landDip` already reads as
+        // landing compression, and `airPitch` below already differentiates
+        // rising/falling/apex off real vertical velocity, but nothing marked
+        // the instant of takeoff itself.
+        this._launchT += h;
+        if (ch.jumpFired) this._launchT = 0;
+        {
+            const LC = 0.06, LE = 0.10, LD = 0.20;
+            const t = this._launchT;
+            if (t < LC) this._launchKick = -(t / LC);
+            else if (t < LC + LE) this._launchKick = -1 + ((t - LC) / LE) * 2;
+            else if (t < LC + LE + LD) this._launchKick = 1 - (t - LC - LE) / LD;
+            else this._launchKick = 0;
+        }
+
         const grounded = ch.grounded;
 
         // Lean forward with speed, and *into* acceleration — the classic read
-        // that a figure is pushing rather than being dragged.
+        // that a figure is pushing rather than being dragged. Raised from
+        // 0.10 to 0.16: at a full sprint the old value left too upright a
+        // torso for a "powerful forward-biased action silhouette".
         const fwdAcc =
             ch.acceleration.x * Math.sin(ch.facing) + ch.acceleration.z * Math.cos(ch.facing);
         // Clamped, because the accelerations at either end of a surf run are an
@@ -292,15 +325,21 @@ export class Figure {
         //
         // Airborne, the same pitch term instead answers vertical velocity:
         // rising leans back a little, falling leans forward in anticipation
-        // of landing — clamped tight, since this is attitude, not a diving
-        // animation. A dash adds its own forward commitment on top.
+        // of landing, and the two naturally cross through a neutral, upright
+        // pitch right at the apex where vertical velocity itself crosses
+        // zero — the "apex transition" beat, for free, from the same number
+        // that already drives rising/falling. Clamped tight, since this is
+        // attitude, not a diving animation. A dash adds its own forward
+        // commitment on top; the launch kick adds a brief backward pop as
+        // the legs finish extending.
         const airPitch = grounded ? 0 : -clamp(ch.verticalVelocity * 0.015, -0.12, 0.12);
         const dashPitch = ch.dashing && ch.dashKind === 1 ? 0.20 : ch.dashing ? 0.10 : 0;
+        const launchPitch = -this._launchKick * 0.05;
         const pitchWant =
-            0.10 * run
+            0.16 * run
             + 0.012 * clamp(fwdAcc, -9, 22)
             + surf * (0.30 + 0.16 * ch.speed01)
-            + airPitch + dashPitch;
+            + airPitch + dashPitch + launchPitch;
         this.pitch = damp(this.pitch, pitchWant, 7, h);
 
         const rollWant = ch.lean * (0.16 + 0.34 * surf) * (1 + this._cutKick * 0.8);
@@ -317,8 +356,16 @@ export class Figure {
         this.bob = damp(this.bob, bobWant, 18, h);
 
         // Crouch: a little at running speed, a lot on the board, more still
-        // for a beat after a hard landing — `_landDip` above.
-        const crouch = 0.035 * run + surf * (0.13 + 0.05 * ch.speed01) + this._landDip * 0.24;
+        // for a beat after a hard landing — `_landDip` above — and briefly
+        // deeper still right before a jump leaves the ground, springing back
+        // up through neutral as the legs finish extending — `_launchKick`
+        // above. `-launchKick` is deliberate: the kick is negative during
+        // compression (so this term is positive, deepening the crouch) and
+        // positive during extension (so this term goes negative, standing
+        // the hips up taller than resting height for the pop off the ground).
+        const crouch =
+            0.035 * run + surf * (0.13 + 0.05 * ch.speed01) + this._landDip * 0.24
+            - this._launchKick * 0.05;
         this.hipY = damp(this.hipY, HIP_HEIGHT - crouch, 9, h);
 
         // The figure settles into the snow it is standing on. Reading the real
@@ -355,7 +402,11 @@ export class Figure {
 
         // Pelvis. Its yaw counter-rotates against the shoulders during a stride,
         // which is most of what stops a procedural walk reading as a shop dummy.
-        const twist = (1 - surf) * 0.13 * run * Math.sin(2 * Math.PI * ch.gaitPhase);
+        // Raised from 0.13 to 0.18 for a more committed counter-rotation at a
+        // full sprint — the chest twists at 1.5x this (below), so the two
+        // together read as real hip/shoulder separation rather than a stiff
+        // block turning as one piece.
+        const twist = (1 - surf) * 0.18 * run * Math.sin(2 * Math.PI * ch.gaitPhase);
         composeBasis(ch.facing + twist, this.pitch, this.roll);
         this._setBone(B_ROOT, gx, rootY, gz, _axes[3], _axes[4], _axes[5], _axes[6], _axes[7], _axes[8]);
 
@@ -494,8 +545,11 @@ export class Figure {
                 const px = this.plant[f * 3], py = this.plant[f * 3 + 1], pz = this.plant[f * 3 + 2];
                 this.footPos[f * 3] = px + (nx - px) * e;
                 this.footPos[f * 3 + 2] = pz + (nz - pz) * e;
+                // Knee-lift height raised from 0.12 to 0.17x run: a fast
+                // sprint wants a genuinely high-knee swing, not the same
+                // shallow arc a jog uses just scaled by distance.
                 this.footPos[f * 3 + 1] =
-                    py + (ny - py) * e + Math.sin(Math.PI * s) * (0.055 + 0.12 * run);
+                    py + (ny - py) * e + Math.sin(Math.PI * s) * (0.055 + 0.17 * run);
                 this.footWeight[f] = damp(this.footWeight[f], 0, 22, h);
             }
 
@@ -605,7 +659,11 @@ export class Figure {
     _poseArms(h, ch, cx, cy, cz, rX, rY, rZ, uX, uY, uZ, fX, fY, fZ) {
         const surf = ch.surf;
         const run = Math.min(1, ch.speed / RUN_NORM);
-        const swing = Math.sin(2 * Math.PI * ch.gaitPhase) * (0.20 + 0.42 * run) * (1 - surf);
+        // Raised from 0.42 to 0.54: a full sprint's arm pump was too close to
+        // a jog's, which is most of why running still read as mild. The
+        // elbow-bend pole vector below is unchanged, so this only pushes the
+        // hand target further fore/aft — the bend itself doesn't loosen.
+        const swing = Math.sin(2 * Math.PI * ch.gaitPhase) * (0.20 + 0.54 * run) * (1 - surf);
         // Slow idle drift so a standing figure is never perfectly still.
         const idle = Math.sin(this._t * 0.9) * 0.02 + Math.sin(this._t * 1.7 + 1.3) * 0.012;
 

@@ -49,10 +49,11 @@ const _n = new Vector3();
 // -------------------------------------------------------------- ground speed
 //
 // Control-revision pass: there is one ground-movement target now, not a
-// Shift-gated tier. WASD/arrows always drive full-speed camera-relative
-// traversal — "the player does not explicitly toggle WALK versus RUN versus
-// SPRINT" — and Shift is a discrete jump/Sand Step button instead (see
-// `_tryJump`). A slower presentation at low input/velocity still exists —
+// held-modifier-gated tier. WASD/arrows always drive full-speed camera-
+// relative traversal — "the player does not explicitly toggle WALK versus
+// RUN versus SPRINT" — and Space is a discrete jump/Sand Step button
+// instead (see `_tryJump`; Phase 8B moved this off Shift). A slower
+// presentation at low input/velocity still exists —
 // see `figure.js`'s idle→light-run→sprint pose blend — but it is read off
 // actual speed, not chosen by the player through a modifier key.
 //

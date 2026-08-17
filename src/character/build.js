@@ -46,8 +46,15 @@ export const M_TRIM = 5;     // the scarf/wrap accent — the one controlled rus
 export const M_FUR = 6;      // frayed wrap-fibre trim (see buildFur's note — no longer at the hood)
 export const M_METAL = 7;    // sparse buckle/clip accents
 
-/** Segments around a limb. 14 is smooth at the distances this is seen from. */
-const SEG = 14;
+/**
+ * Segments around a limb. Phase 8B: raised from 14 — with the camera now
+ * sitting closer (see `camera.js`) and the environment carrying real
+ * microdetail, 14-gon limbs started reading as faceted cylinders rather
+ * than round ones. 20 removes that at a triangle-count cost this build
+ * comfortably affords: one hero character, built once at load, never
+ * rebuilt per frame.
+ */
+const SEG = 20;
 
 // -----------------------------------------------------------------------------
 
@@ -213,6 +220,37 @@ function capRing(B, ring, neighbour, row, matId, isStart) {
     }
 }
 
+/**
+ * A minimal oriented box — eight vertices, six quads, disconnected from
+ * whatever it sits against (same trick the belt buckle already used, pulled
+ * out into a helper so the belt pouches and strap buckle below don't repeat
+ * it). `half` is the box's own half-extents along its own X/Y/Z; `ax`/`ay`
+ * are that box's local X and Y axes in world space (Z is derived), so the
+ * same helper can place a box flat against the belt or angled across the
+ * chest without a second code path.
+ */
+function buildBox(B, cx, cy, cz, half, ax, ay, matId, ao, bones) {
+    const azx = ax[1] * ay[2] - ax[2] * ay[1];
+    const azy = ax[2] * ay[0] - ax[0] * ay[2];
+    const azz = ax[0] * ay[1] - ax[1] * ay[0];
+    const corner = (sx, sy, sz) => {
+        const x = cx + (ax[0] * sx * half[0] + ay[0] * sy * half[1] + azx * sz * half[2]);
+        const y = cy + (ax[1] * sx * half[0] + ay[1] * sy * half[1] + azy * sz * half[2]);
+        const z = cz + (ax[2] * sx * half[0] + ay[2] * sy * half[1] + azz * sz * half[2]);
+        return B.vert(x, y, z, (sx + 1) * 0.5, (sy + 1) * 0.5, matId, ao, bones[0], bones[1], bones[2], bones[3]);
+    };
+    const p000 = corner(-1, -1, -1), p100 = corner(1, -1, -1);
+    const p110 = corner(1, 1, -1), p010 = corner(-1, 1, -1);
+    const p001 = corner(-1, -1, 1), p101 = corner(1, -1, 1);
+    const p111 = corner(1, 1, 1), p011 = corner(-1, 1, 1);
+    B.quad(p001, p101, p111, p011); // +Z
+    B.quad(p100, p000, p010, p110); // -Z
+    B.quad(p000, p001, p011, p010); // -X
+    B.quad(p101, p100, p110, p111); // +X
+    B.quad(p010, p011, p111, p110); // +Y
+    B.quad(p001, p000, p100, p101); // -Y
+}
+
 /** Bone blend along the spine, by bind-pose height. */
 function spineBones(y) {
     if (y < 1.06) {
@@ -312,6 +350,48 @@ export function buildBody(scene) {
         B.quad(p001, p000, p100, p101); // bottom
     }
 
+    // ---- utility belt pouches + diagonal strap -----------------------------
+    // Three asymmetric pouches (deliberately uneven sizes/positions, not a
+    // mirrored pair) and a diagonal equipment strap crossing the torso —
+    // item 2's explicit "2-3 asymmetric pouches" and "diagonal equipment
+    // strap". All rigid accessory geometry, bound the same way the belt and
+    // buckle already are: not simulated cloth, no new bones.
+    {
+        const beltBones = spineBones(0.97);
+        // Right hip: one larger pouch.
+        buildBox(
+            B, 0.148, 0.945, 0.078, [0.032, 0.042, 0.026],
+            [1, 0, 0], [0, 1, 0], M_LEATHER, 0.58, beltBones
+        );
+        // Left hip: two smaller pouches, offset and unevenly sized — the
+        // asymmetry against the single right-hip pouch above.
+        buildBox(
+            B, -0.150, 0.958, 0.058, [0.024, 0.032, 0.020],
+            [1, 0, 0], [0, 1, 0], M_LEATHER, 0.58, beltBones
+        );
+        buildBox(
+            B, -0.150, 0.918, 0.098, [0.019, 0.023, 0.017],
+            [1, 0, 0], [0, 1, 0], M_LEATHER, 0.54, beltBones
+        );
+
+        // Diagonal strap: left shoulder to right hip, crossing the chest.
+        // Bound per-ring by height the same way the torso itself is (there
+        // is no single bone a diagonal strap could rigidly follow), so it
+        // rides the spine/chest blend rather than a fixed joint.
+        const strapA = [-0.145, 1.335, 0.078];
+        const strapB = [0.140, 0.965, 0.100];
+        const strapSteps = 6;
+        const strap = [];
+        for (let i = 0; i <= strapSteps; i++) {
+            const t = i / strapSteps;
+            const x = strapA[0] + (strapB[0] - strapA[0]) * t;
+            const y = strapA[1] + (strapB[1] - strapA[1]) * t;
+            const z = strapA[2] + (strapB[2] - strapA[2]) * t;
+            strap.push(ring(x, y, z, 0.026, 0.014, 0.55, spineBones(y)));
+        }
+        loft(B, strap, M_LEATHER, [0, 0, 1], true, true);
+    }
+
     // ---- neck + head ------------------------------------------------------
     const neck = [
         ring(0, 1.42, -0.005, 0.062, 0.058, 0.35, [B_NECK, 1, B_HEAD, 0]),
@@ -367,15 +447,39 @@ export function buildBody(scene) {
         );
         loft(B, fore, M_ROBE, [0, 0, 1], false, false);
 
-        // The hand is a mitt. Fingers at this distance are three pixels of
-        // noise; a clean silhouette reads better and costs nothing.
+        // Phase 8B: the hand no longer needs individually simulated fingers,
+        // but it needs to read as a hand rather than a mitt. Two changes from
+        // the old four-ring taper: a genuine wrist-to-palm transition (the
+        // wrist ring is narrower than the palm now, not the same width), and
+        // a flattened cross-section through the palm/knuckle rings — real
+        // hands are wider than they are thick, and a round cross-section is
+        // exactly what reads as a sphere-tipped stick.
         const hand = [
-            ring(s * 0.243, 0.866, 0.016, 0.044, 0.038, 0.55, [hd, 1, 0, 0]),
-            ring(s * 0.245, 0.820, 0.024, 0.050, 0.040, 0.55, [hd, 1, 0, 0]),
-            ring(s * 0.247, 0.780, 0.032, 0.046, 0.036, 0.52, [hd, 1, 0, 0]),
-            ring(s * 0.248, 0.752, 0.038, 0.030, 0.026, 0.50, [hd, 1, 0, 0]),
+            ring(s * 0.243, 0.866, 0.016, 0.036, 0.032, 0.55, [hd, 1, 0, 0]),
+            ring(s * 0.245, 0.838, 0.022, 0.052, 0.030, 0.55, [hd, 1, 0, 0]),
+            ring(s * 0.247, 0.805, 0.030, 0.055, 0.028, 0.52, [hd, 1, 0, 0]),
+            ring(s * 0.248, 0.770, 0.036, 0.045, 0.024, 0.50, [hd, 1, 0, 0]),
+            ring(s * 0.249, 0.744, 0.040, 0.026, 0.018, 0.48, [hd, 1, 0, 0]),
         ];
-        loft(B, hand, M_LEATHER, [0, 0, 1], false, true);
+        loft(B, hand, M_LEATHER, [1, 0, 0], false, true);
+
+        // A thumb silhouette — a short, independent, sharply-tapered stub
+        // glued to the palm's outer edge rather than welded into the hand
+        // loft's topology (same trick as the belt buckle below: a handful of
+        // vertices with no shared seam to keep correct). Angled forward and
+        // down off the palm so it reads as a digit crossing in front of the
+        // hand, not a second wrist.
+        {
+            const tx0 = s * 0.243 + s * 0.030, ty0 = 0.828, tz0 = 0.040;
+            const tx1 = s * 0.243 + s * 0.046, ty1 = 0.802, tz1 = 0.062;
+            const tx2 = s * 0.243 + s * 0.052, ty2 = 0.784, tz2 = 0.074;
+            const thumb = [
+                ring(tx0, ty0, tz0, 0.017, 0.017, 0.55, [hd, 1, 0, 0]),
+                ring(tx1, ty1, tz1, 0.016, 0.016, 0.52, [hd, 1, 0, 0]),
+                ring(tx2, ty2, tz2, 0.010, 0.010, 0.48, [hd, 1, 0, 0]),
+            ];
+            loft(B, thumb, M_LEATHER, [0, 1, 0], false, true);
+        }
     }
 
     // ---- legs and boots ---------------------------------------------------
@@ -404,13 +508,19 @@ export function buildBody(scene) {
 
         // The boot runs along the foot's own axis, so it swings with the ankle
         // roll rather than being a block bolted to the shin.
+        //
+        // Phase 8B: seven rings instead of six, with a genuine heel counter
+        // (a distinct bulge right behind the ankle, not a plain taper) and a
+        // toe box that lifts at the very tip — "substantial desert boots"
+        // with "slight upward toe curvature", instead of a sock-shaped tube.
         const boot = [
-            ring(s * 0.100, 0.055, -0.088, 0.046, 0.052, 0.35, [ft, 1, 0, 0]),
-            ring(s * 0.100, 0.058, -0.050, 0.056, 0.066, 0.38, [ft, 1, 0, 0]),
-            ring(s * 0.100, 0.054, 0.010, 0.058, 0.060, 0.42, [ft, 1, 0, 0]),
-            ring(s * 0.100, 0.048, 0.078, 0.056, 0.050, 0.45, [ft, 1, 0, 0]),
-            ring(s * 0.100, 0.043, 0.142, 0.050, 0.043, 0.48, [ft, 1, 0, 0]),
-            ring(s * 0.100, 0.040, 0.190, 0.033, 0.031, 0.48, [ft, 1, 0, 0]),
+            ring(s * 0.100, 0.050, -0.095, 0.042, 0.048, 0.32, [ft, 1, 0, 0]),
+            ring(s * 0.100, 0.064, -0.070, 0.052, 0.064, 0.38, [ft, 1, 0, 0]),
+            ring(s * 0.100, 0.056, -0.014, 0.058, 0.062, 0.42, [ft, 1, 0, 0]),
+            ring(s * 0.100, 0.049, 0.050, 0.058, 0.052, 0.46, [ft, 1, 0, 0]),
+            ring(s * 0.100, 0.045, 0.108, 0.053, 0.043, 0.48, [ft, 1, 0, 0]),
+            ring(s * 0.100, 0.048, 0.160, 0.038, 0.031, 0.50, [ft, 1, 0, 0]),
+            ring(s * 0.100, 0.058, 0.198, 0.022, 0.018, 0.50, [ft, 1, 0, 0]),
         ];
         loft(B, boot, M_LEATHER, [0, 1, 0], true, true);
     }

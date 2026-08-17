@@ -71,8 +71,16 @@ export class CameraRig {
         this.yaw = 2.4;
         this.pitch = 0.17;
 
-        this.distance = 6.2;
-        this.distanceTarget = 6.2;
+        // Phase 8B: pulled in from 6.2 — with the environment now carrying
+        // real dune microstructure and the character carrying real geometric
+        // detail, the traveler no longer needs to sit small in frame to sell
+        // scale. ~4.8 puts them roughly 25-30% larger on screen at the
+        // default zoom during ordinary running. Surf/dash framing is
+        // untouched: `_extraDist` below still adds the same amount on top of
+        // whatever this base is, so the camera still pulls out by the same
+        // increment at speed — it is just pulling out from a closer start.
+        this.distance = 4.8;
+        this.distanceTarget = 4.8;
 
         /** Smoothed pivot position (the thing the spring chases). */
         this.pivot = new Vector3(0, 0, 0);

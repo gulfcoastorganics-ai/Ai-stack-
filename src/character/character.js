@@ -65,16 +65,25 @@ const CHAR_CASCADES = 2;
  * longer needs to be *quite* as dark as SNOWFLOW's figure to still separate,
  * but "not beige" is still the operative constraint (item 7).
  */
+// Phase 8B: lightened off SNOWFLOW-derived near-black toward genuinely
+// separable hues — the brief's explicit "the character remains too dark,
+// establish clear PBR separation" — without brightening the frame globally
+// (that stays a `settings.js`/tonemap question, untouched here). Each slot
+// still sits several stops under the sand's own albedo, so the silhouette
+// read the file header explains is preserved; only the *relative* spread
+// between slots widened; charcoal-brown coat, reddish-brown leather, faded
+// rust/saffron trim, and a warm bronze-toned metal instead of a neutral
+// dark grey.
 const PALETTE = [
     // rgb, roughness
-    [0.038, 0.030, 0.024, 0.82], // 0 M_ROBE:   outer coat, charcoal/deep brown
-    [0.155, 0.120, 0.082, 0.76], // 1 M_MANTLE: shoulder wrap, weathered sandstone/khaki
-    [0.220, 0.190, 0.148, 0.80], // 2 M_TUNIC:  inner tunic lining, warm pale undyed cloth
-    [0.052, 0.036, 0.024, 0.55], // 3 M_LEATHER: belt, boots, wraps — dark worn leather
+    [0.058, 0.044, 0.034, 0.80], // 0 M_ROBE:   outer coat, charcoal-brown rough cloth
+    [0.178, 0.146, 0.106, 0.74], // 1 M_MANTLE: shoulder wrap, dusty beige/khaki
+    [0.238, 0.200, 0.152, 0.78], // 2 M_TUNIC:  inner tunic lining, warm sandstone
+    [0.078, 0.044, 0.030, 0.52], // 3 M_LEATHER: belt, boots, wraps — dark reddish-brown leather
     [0.145, 0.100, 0.075, 0.85], // 4 M_SKIN:   deep in shadow under the hood/scarf
-    [0.420, 0.185, 0.085, 0.62], // 5 M_TRIM:   the one controlled accent — muted rust
-    [0.360, 0.290, 0.205, 0.88], // 6 M_FUR:    frayed scarf/hem fibres, dusty khaki
-    [0.048, 0.043, 0.040, 0.30], // 7 M_METAL:  sparse buckle/clip accents, dark oxidised
+    [0.470, 0.220, 0.095, 0.60], // 5 M_TRIM:   the one controlled accent — faded rust/saffron
+    [0.370, 0.300, 0.215, 0.88], // 6 M_FUR:    frayed scarf/hem fibres, dusty beige
+    [0.115, 0.088, 0.058, 0.36], // 7 M_METAL:  buckle/clip/strap accents, weathered bronze
 ];
 
 /**
