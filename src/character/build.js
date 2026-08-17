@@ -407,6 +407,30 @@ export function buildBody(scene) {
     }
     loft(B, head, M_SKIN, [0, 0, 1], true, true);
 
+    // ---- eyes ---------------------------------------------------------
+    // Narrow, readable, not realistic: two small flat strips at brow
+    // height, in the gap between the scarf's top edge (y ~1.642, below)
+    // and the hood's own shadow (above) — the one place on the whole
+    // skull actually meant to be seen. The read comes almost entirely
+    // from occlusion, not shape: everywhere else on the skull carries a
+    // heavy baked `ao` of 0.22 specifically so the shadowed hood interior
+    // stays dark regardless of sun angle (see the skull's own comment
+    // above); these two strips carry a much lighter 0.62, so the shading
+    // pass's occlusion term barely touches them and they catch a genuine
+    // glint of reflected/ambient light against the darkness around them
+    // — "the eye opening should catch a tiny amount of reflected light so
+    // the head doesn't collapse into black", without modelling an actual
+    // eye. Built the same disconnected-box way as the belt buckle/pouches:
+    // a handful of vertices glued to the skull, no shared topology.
+    for (let e = 0; e < 2; e++) {
+        const ex = e === 0 ? -1 : 1;
+        buildBox(
+            B, ex * 0.032, 1.663, 0.080,
+            [0.015, 0.007, 0.004], [1, 0, 0], [0, 1, 0],
+            M_SKIN, 0.62, [B_HEAD, 1, 0, 0]
+        );
+    }
+
     // A scarf across the lower face, as in the reference. It is what stops the
     // shadowed skull reading as an empty hood.
     //
