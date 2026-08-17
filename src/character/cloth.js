@@ -283,7 +283,11 @@ function makeScarfTail() {
     });
 
     const RATE = [Infinity, Infinity, 14, 5, 2.2, 1.1, 0.6, 0.4, 0.3, 0.24];
-    const HW = 0.052; // half-width at the throat, narrowing toward the tip
+    // Visual-pass target: widened at the throat (0.052 -> 0.064) and tapered
+    // harder toward the tip (0.35 -> 0.55) — a thicker root easing into a
+    // genuinely narrow trailing end reads as a real wound scarf tail, where
+    // the old near-uniform width read as a flat ribbon.
+    const HW = 0.064; // half-width at the throat, narrowing toward the tip
 
     for (let j = 0; j < p.rows; j++) {
         const v = j / (p.rows - 1);
@@ -291,7 +295,7 @@ function makeScarfTail() {
         // clears the shoulder wrap instead of resting inside it.
         const y = 1.360 - 0.520 * v - 0.10 * v * v;
         const z = -0.05 - 0.10 * v;
-        const w = HW * (1 - 0.35 * v);
+        const w = HW * (1 - 0.55 * v);
         for (let i = 0; i < p.cols; i++) {
             const t = i / (p.cols - 1) - 0.5; // -0.5..0.5 across the width
             const o = (j * p.cols + i) * 3;

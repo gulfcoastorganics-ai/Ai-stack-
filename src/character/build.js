@@ -409,10 +409,16 @@ export function buildBody(scene) {
 
     // A scarf across the lower face, as in the reference. It is what stops the
     // shadowed skull reading as an empty hood.
+    //
+    // Visual-pass target: bulked up from a thin wrap (radii barely past the
+    // trimmed skull's own 0.082/0.088) to a genuinely thick winding — real
+    // wound cloth is several layers, not a single skin-tight band, and the
+    // reference art's neck wrap reads noticeably thicker than the jaw it
+    // sits under.
     const scarf = [
-        ring(0, 1.560, 0.010, 0.086, 0.092, 0.30, [B_HEAD, 1, 0, 0]),
-        ring(0, 1.600, 0.012, 0.094, 0.100, 0.34, [B_HEAD, 1, 0, 0]),
-        ring(0, 1.638, 0.008, 0.092, 0.098, 0.30, [B_HEAD, 1, 0, 0]),
+        ring(0, 1.558, 0.012, 0.100, 0.106, 0.30, [B_HEAD, 1, 0, 0]),
+        ring(0, 1.602, 0.015, 0.112, 0.118, 0.34, [B_HEAD, 1, 0, 0]),
+        ring(0, 1.642, 0.010, 0.108, 0.114, 0.30, [B_HEAD, 1, 0, 0]),
     ];
     loft(B, scarf, M_TRIM, [0, 0, 1], false, false);
 
