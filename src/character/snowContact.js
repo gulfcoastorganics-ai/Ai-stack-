@@ -1,5 +1,13 @@
 /**
- * Where the character meets the snow.
+ * Where the character meets the sand.
+ *
+ * SANDSTORM note: this is SNOWFLOW's snow-contact module — same three writers,
+ * same brush-based hand-off into the terrain state buffer, same gait/IK plant
+ * timing. Only the numbers each writer stamps have moved: shallower boot sink
+ * (packed and loose sand compress under a boot far more readily than snow
+ * does, so it takes less depth to read), subtler raised edges (a berm of
+ * grains, not a mounded snow lip), and a footprint radius that widens with
+ * impact so a hard landing visibly compresses more sand than a light step.
  *
  * Translates locomotion state into brushes on the terrain state buffer. This is
  * the only thing standing between the physics in `controller.js` and the marks
@@ -21,10 +29,11 @@
  */
 
 /**
- * Boot geometry, metres. `WIDTH` is the short-axis radius, so the print is
- * 20 cm across and 34 cm long — a boot plus the collapse of the snow around it,
- * which is what a print in deep snow actually measures. Narrower than this and
- * the print is only six texels wide and the rim detail has nowhere to live.
+ * Boot geometry, metres. `WIDTH` is the short-axis radius at a light footfall —
+ * see `_walk`'s footfall branch, which widens it with impact so a hard landing
+ * visibly compresses a wider patch of sand than a light step. Narrower than
+ * this and the print is only a few texels wide and the rim detail has nowhere
+ * to live.
  */
 const BOOT_WIDTH = 0.10;
 const BOOT_ELONG = 1.7;
@@ -95,19 +104,24 @@ export class SnowContact {
             // Recomputed here rather than read off the controller, so it cannot
             // be a frame stale relative to the plant it is describing.
             const impact = Math.min(1.3, 0.35 + ch.speed / 5.4);
+            // A hard landing compresses a wider patch of sand than a light
+            // step, not just a deeper one — unlike snow, which mostly just
+            // sinks. Radius grows up to 60% over the light-footfall width.
+            const footRadius = BOOT_WIDTH * (1 + 0.46 * impact);
             f.brush(
                 px, pz,
-                BOOT_WIDTH,
-                // Depth: a boot sinks 13-27 cm into unpacked snow depending on
-                // how hard it lands. Deeper than that and the character is
-                // wading, which is a different animation problem.
-                0.17 + 0.14 * impact,
-                // The berm is the whole point. Mass pushed out of the hole has
-                // to go somewhere, and seeing it pile at the rim is what makes
-                // the print read as displaced snow rather than as a dark decal.
-                0.10 + 0.08 * impact,
-                0.9,                    // compression: trodden snow is dense
-                0,                      // no ice
+                footRadius,
+                // Depth: a boot sinks noticeably less into sand than it did
+                // into unpacked snow — dry sand compacts and resists underfoot
+                // well before it reaches snow's 13-27 cm — so this stays
+                // shallower across the same impact range.
+                0.07 + 0.08 * impact,
+                // The berm is still the point — mass pushed out of the hole has
+                // to go somewhere — but it is a subtler ridge of grains than
+                // snow's mounded lip, not a dramatic pile.
+                0.045 + 0.045 * impact,
+                0.9,                    // compaction: trodden sand packs dense
+                0,                      // no crust from an ordinary footfall
                 ch.facing,
                 BOOT_ELONG,
                 1.0                     // full rim roughness — boots tear edges
@@ -119,15 +133,18 @@ export class SnowContact {
     }
 
     /**
-     * Snow thrown by a boot landing.
+     * Sand thrown by a boot landing.
      *
      * Fired from the same branch that stamps the print, so the grains leave the
      * ground on the exact frame the foot arrives — one event, rather than two
      * systems agreeing about when it happened.
      *
-     * The kick goes up and *backward* relative to travel. A boot in deep snow
-     * scoops: it enters forward, compresses, and throws the displaced snow out
-     * behind the heel as the weight rolls over it.
+     * The kick goes up and *backward* relative to travel. A boot in loose sand
+     * scoops: it enters forward, compresses, and throws the displaced grain out
+     * behind the heel as the weight rolls over it. Running kicks back
+     * noticeably harder than walking — `back` below carries an explicit speed
+     * term on top of the impact scaling, so a sprinting footfall throws a
+     * visibly longer plume than a stroll at the same landing force would.
      */
     _kick(x, y, z, impact) {
         const sp = this.spray;
@@ -137,17 +154,18 @@ export class SnowContact {
 
         const fx = Math.sin(ch.facing);
         const fz = Math.cos(ch.facing);
-        // Many small grains rather than a few large ones. The size at which a
-        // puff stops reading as powder and starts reading as a cotton ball is
-        // somewhere around five centimetres, and it is a hard threshold.
+        // Many small grains rather than a few large ones. Sand grains read as
+        // smaller and more numerous than snow's powder puffs at the same
+        // apparent density.
         const n = 6 + ((impact * 14) | 0);
+        const speedKick = Math.min(1.4, ch.speed / 7.0);
 
         for (let k = 0; k < n; k++) {
-            const spread = 0.9;
+            const spread = 0.85;
             const rx = (Math.random() - 0.5) * spread;
             const rz = (Math.random() - 0.5) * spread;
-            const up = 0.9 + Math.random() * 1.9;
-            const back = 0.5 + Math.random() * 1.6 * impact;
+            const up = 0.75 + Math.random() * 1.5;
+            const back = 0.5 + Math.random() * 1.5 * impact + speedKick * 0.9;
             // A fifth of it is heavier stuff that flies further and falls faster.
             const clod = Math.random() < 0.22 ? 1 : 0;
 
@@ -156,7 +174,7 @@ export class SnowContact {
                 -fx * back + rx * 1.3 + ch.velocity.x * 0.25,
                 up * (clod ? 1.25 : 1.0),
                 -fz * back + rz * 1.3 + ch.velocity.z * 0.25,
-                clod ? 0.014 + Math.random() * 0.012 : 0.020 + Math.random() * 0.030,
+                clod ? 0.011 + Math.random() * 0.010 : 0.015 + Math.random() * 0.022,
                 clod ? 0.55 + Math.random() * 0.35 : 0.55 + Math.random() * 0.60,
                 clod
             );
@@ -164,8 +182,8 @@ export class SnowContact {
     }
 
     /**
-     * Walking scuff. Very shallow, and only while actually moving — a standing
-     * character should not slowly bore a hole.
+     * Walking scuff through loose sand. Very shallow, and only while actually
+     * moving — a standing character should not slowly bore a hole.
      */
     _walk(dt, moved) {
         const ch = this.character;
@@ -200,11 +218,11 @@ export class SnowContact {
     }
 
     /**
-     * The surf wake.
+     * The dune-surf wake.
      *
      * Three brushes: the groove the board cuts, and one berm on each side
      * weighted by the carve, so the outside of a turn throws a much heavier wall
-     * of snow than the inside. That asymmetry is what makes a carve read as a
+     * of sand than the inside. That asymmetry is what makes a carve read as a
      * carve rather than as a straight furrow.
      */
     _surf(dt, moved) {
@@ -262,7 +280,11 @@ export class SnowContact {
         const sideR = 0.5 - lean * 0.5;
 
         const off = SURF_WIDTH * (1.5 + 0.5 * fast);
-        const throwK = 0.75 * k * (0.55 + 0.9 * outside) * (1 + 0.5 * fast);
+        // Raised a little over SNOWFLOW's throw weight: a berm of dry sand
+        // grains reads as a shape from further away than an equivalent mass of
+        // snow did, so the outer wall wants to be a touch more generous to stay
+        // legible as "raised outer berm" rather than a thin ridge.
+        const throwK = 0.85 * k * (0.55 + 0.9 * outside) * (1 + 0.5 * fast);
 
         f.brush(
             ch.position.x - rx * off, ch.position.z - rz * off,

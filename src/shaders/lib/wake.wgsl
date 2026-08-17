@@ -1,5 +1,15 @@
 // -----------------------------------------------------------------------------
-// snowWake — the shape of the snow-surf wake.
+// snowWake — the shape of the dune-surf wake.
+//
+// SANDSTORM: this is SNOWFLOW's snow-surf wake geometry — the swept-mesh
+// architecture, the spine/resampling scheme and the per-side amplitude/curl
+// resolution are all unchanged. Only `wakeSection`'s cross-section integral is
+// retuned below, from a fully overhanging plunging lip (the read of a
+// breaking ocean wave) to a steep cresting bank that leans over without
+// curling into a hollow tube — granular sand cascading over its own crest
+// rather than a fluid wave folding onto itself. `curl` still runs continuously
+// from a low heaped berm to that steep cresting bank; it just no longer
+// reaches all the way to a plunging barrel.
 //
 // Shared by the beauty pass, the depth pass and the fragment erosion, for the
 // same reason `snowDeform` is shared: three copies of a surface definition will
@@ -7,10 +17,10 @@
 // the thing casting it — is both subtle and impossible to attribute.
 //
 // The wake is a swept surface. Its spine is the path the board has taken,
-// resampled every ~0.3 m into a small data texture; its cross-section is a
-// breaking wave, integrated here from a turning tangent rather than authored as
-// a spline, so a single `curl` parameter takes it continuously from a low heaped
-// berm to a fully overhanging plunging lip.
+// resampled every ~0.3 m into a small data texture; its cross-section is
+// integrated here from a turning tangent rather than authored as a spline, so
+// a single `curl` parameter takes it continuously from a low heaped berm to a
+// steep, cresting granular bank.
 //
 // Spine texture layout, one column per sample, column 0 = the bow:
 //
@@ -31,7 +41,7 @@ const WAKE_STEPS: i32 = 20;
 /// Normalises the integral so the crest lands near 1.0, which is what lets
 /// amplitude be one number in metres rather than a per-curl table. It is not
 /// exact across the curl range on purpose — a mild bank comes out a little taller
-/// and much wider than a plunging one, which is what a mild bank does.
+/// and much wider than a steep one, which is what a mild bank does.
 const WAKE_NORM: f32 = 3.35;
 
 /// The section is squashed across, not scaled uniformly.
@@ -39,27 +49,35 @@ const WAKE_NORM: f32 = 3.35;
 /// Left to its own proportions the curve is wider than it is tall, and at 2.4 m
 /// of amplitude that is a three-metre-wide ramp: legible as terrain, not as
 /// something thrown. Steepening it is the difference between a bank and a wave.
-const WAKE_LATERAL: f32 = 0.70;
+///
+/// SANDSTORM: widened slightly from SNOWFLOW's 0.70 — a sand berm reads as a
+/// heaped mass rather than a thin curling sheet, and now that `wakeSection`
+/// no longer sweeps into a plunging overhang there is less need to compress
+/// the silhouette down to a sheet-thin profile.
+const WAKE_LATERAL: f32 = 0.82;
 
-/// Cross-section of a breaking wave, in (lateral, up), unit height.
+/// Cross-section of the wake, in (lateral, up), unit height.
 ///
 /// The curve is defined by its *tangent angle* rather than by its position: the
 /// tangent sweeps from just below horizontal at the base, through vertical
-/// partway up the face, to well past 180 degrees at the tip — so the lip hangs
-/// back over the face it came off, which is the whole read of a breaking wave and
-/// is not something a heightfield can express at all.
+/// partway up the face, to somewhat past vertical at the tip — enough for the
+/// crest to lean forward and cast a real silhouette, not enough to hook back
+/// into an overhanging tube. A heightfield could not express even this much
+/// lean, but stopping short of the ~270-degree range a breaking wave needs is
+/// what keeps this reading as sand cresting rather than water curling.
 ///
-/// At `curl` = 1 the sweep reaches 284 degrees: the tip sits at 47% of the
-/// crest's lateral offset and 65% of its height, so it genuinely overhangs.
-/// Stop short of ~270 and the tip is still outboard of the crest, which reads
-/// as a rounded ridge.
+/// At `curl` = 1 the sweep reaches 200 degrees: past vertical, so the crest
+/// visibly leans and casts a real shadow, but the tip stays inboard of a true
+/// overhang. SNOWFLOW's snow-surf wake ran this to 284 degrees for a fully
+/// plunging barrel; dry sand does not hold that shape, so the range was cut
+/// by roughly a third.
 ///
 /// The 1.65 exponent puts most of the arc length into the face and compresses the
-/// hook into the last fifth. A linear sweep gives a circle, which reads as a
-/// rolled tube of snow rather than as something thrown.
+/// lean into the last fifth. A linear sweep gives a circle, which reads as a
+/// rolled tube rather than as something thrown.
 fn wakeSection(q: f32, curl: f32) -> vec2f {
     let th0 = -0.24;                     // base flares outward and slightly down
-    let th1 = 1.65 + curl * 3.30;        // 95 deg (heap) .. 284 deg (plunging)
+    let th1 = 1.65 + curl * 1.84;        // 95 deg (heap) .. 200 deg (cresting)
     var p = vec2f(0.0, 0.0);
     let dt = q / f32(WAKE_STEPS);
     for (var i = 0; i < WAKE_STEPS; i++) {
@@ -161,7 +179,12 @@ fn wakePoint(tex: texture_2d<f32>, count: f32, u: f32, q: f32, side: f32, t: f32
     // height, all the way down the wake — and the wall comes out looking like a
     // caterpillar. Weighted toward the crest, because the base is held in place
     // by the ground and it is the top that is free to gather.
-    let thq = -0.24 + (1.89 + sc.y * 3.30) * pow(q, 1.65);
+    //
+    // Must track `wakeSection`'s (th1 - th0) exactly — this is the same angular
+    // sweep evaluated for the lump's normal rather than for the surface point,
+    // and the two disagreeing is what would misalign the gathered-mass normal
+    // from the surface it is bumping.
+    let thq = -0.24 + (1.89 + sc.y * 1.84) * pow(q, 1.65);
     let secN = vec2f(-sin(thq), cos(thq));
     // Unit scale, like `sec` — both are taken into metres by the same amplitude.
     // Drifting, for the same reason the erosion does: a static lump field on a

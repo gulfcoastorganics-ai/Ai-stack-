@@ -70,22 +70,31 @@ fn backScatter(N: vec3f, L: vec3f, V: vec3f, distortion: f32, power: f32, thickn
     return vh * thickness;
 }
 
-/// Combined snow subsurface response for one light.
+/// Combined subsurface/transmission response for one light. Shared by every
+/// material in the scene that needs a "thin edge glows, thick mass does not"
+/// term — the ground, the wake, the character and the spells.
+///
+/// SANDSTORM note: the tint constants below were SNOWFLOW's snow-blue —
+/// deeper snow scatters longer and comes back bluer because red is absorbed
+/// first over an appreciable path, which is the entire reason snow shadows
+/// read blue. Dry sand does not have that mean free path at all, so this term
+/// is used far more sparingly on sand materials now (see the much lower
+/// `sssStrength` callers pass in), and where it does show — a thin curtain of
+/// airborne dust backlit by the sun — the physically apt colour is warm and
+/// golden, not blue, so the tint moved to that axis rather than being merely
+/// dimmed.
 /// Returns the RGB radiance contribution to add to the diffuse lobe.
 fn snowSubsurface(
     N: vec3f,
     L: vec3f,
     V: vec3f,
     lightColor: vec3f,
-    thickness: f32,   // 0 = thin edge, 1 = deep drift
+    thickness: f32,   // 0 = thin edge, 1 = deep mass
     strength: f32,
     radius: f32
 ) -> vec3f {
-    // Deeper snow scatters longer and comes back bluer, because red is absorbed
-    // first over any appreciable path length. This is the entire reason snow
-    // shadows are blue rather than merely dark.
-    let shallowTint = vec3f(0.94, 0.965, 1.0);
-    let deepTint = vec3f(0.55, 0.72, 1.0);
+    let shallowTint = vec3f(1.0, 0.93, 0.82);
+    let deepTint = vec3f(0.90, 0.55, 0.25);
     let tint = mix(shallowTint, deepTint, clamp(thickness * radius, 0.0, 1.0));
 
     // Lobe width and amplitude both key off thickness, and both run the

@@ -1,21 +1,19 @@
 // -----------------------------------------------------------------------------
-// The snow-surf wake — shading.
+// The dune-surf wake — shading.
 //
-// This is snow that has just left the ground, and it is a different material from
-// the field it came out of even though it is the same substance. Freshly broken
-// snow is looser, brighter and rougher than the pack, and — the part that matters
-// most here — it is *thin*. A wave crest is centimetres of powder held up in the
-// air, so it transmits: with the sun low and behind it, the lip should light up
-// from the inside rather than going to silhouette.
-//
-// So the subsurface term is driven off the section parameter rather than off a
-// constant: thick and opaque at the base where the wall meets the trench, thin
-// and glowing at the lip. That single gradient is most of what separates this
-// from a white ribbon.
+// SANDSTORM: this is SNOWFLOW's snow-surf wake shading, carried over with the
+// same swept-mesh geometry (see `lib/wake.wgsl`, retuned separately) but
+// reworked for a different substance. This is sand that has just left the
+// ground, and it is a different material state from the field it came out of
+// even though it is the same grain — freshly thrown sand is looser, brighter
+// and rougher than the packed dune face. Unlike snow, dry sand does not
+// meaningfully transmit light, so the "thin lip glows from the inside" read
+// SNOWFLOW built around is deliberately toned down here rather than removed
+// outright — see the note on `sss`/`sssTerm` below.
 //
 // Everything else — the cascades, the SH ambient, the glints, the aerial
-// perspective — is the same code the snow field runs, out of the same includes.
-// The wake has to sit in the frame as part of the same world.
+// perspective — is the same code the ground material runs, out of the same
+// includes. The wake has to sit in the frame as part of the same world.
 // -----------------------------------------------------------------------------
 
 #include<snowNoise>
@@ -135,20 +133,20 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     }
 
     // ------------------------------------------------------------- material
-    // Freshly displaced snow: brighter and rougher than the pack it came out of.
-    let albedo = vec3f(0.895, 0.920, 0.965);
-    let roughness = 0.80;
-    let f0 = vec3f(0.026);
+    // Freshly displaced sand: brighter and rougher than the packed dune face it
+    // came out of. SANDSTORM note: dry granular sand does not transmit light
+    // the way snow's mean free path did, so this material leans much harder on
+    // the direct/ambient terms below and much less on the transmission lobe —
+    // see `sss`/`sssTerm` below, where the strength multiplier is cut hard
+    // rather than the tint being kept and merely recoloured.
+    let albedo = vec3f(0.86, 0.70, 0.46);
+    let roughness = 0.88;
+    let f0 = vec3f(0.024);
 
-    // Thin at the lip, deep at the base. This is the gradient the whole read
-    // rests on — see the note at the top.
-    //
-    // The lip end does not go to zero. A wall of thrown powder is ten to thirty
-    // centimetres through, not tissue: at 0.04 the transmission lobe runs at
-    // near full amplitude with a nearly white tint, and since it is multiplied by
-    // a 13-degree sun whose beam is roughly 17:13:6, the result was several times
-    // brighter than the direct diffuse and unmistakably *warm*. On white snow
-    // that reads as dirt — the outer face of the wall came out brown.
+    // Thin at the lip, deep at the base. Kept as a small gradient rather than
+    // removed outright — a wave face genuinely is thinner sand held up in the
+    // air near its own lip — but with `sssStrength` cut hard below, this mostly
+    // just keeps the lip from reading as a solid block of grain.
     let thickness = mix(0.92, 0.32, smoothstep(0.15, 0.95, q));
 
     // ------------------------------------------------------------- lighting
@@ -193,16 +191,16 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let directTerm = albedo * INV_PI * sun * diff * shadow;
     var color = directTerm;
 
-    // Transmission, coupled much harder to the shadow term than the snow field's
-    // is. On the ground a shadowed drift is still fed by light scattering in from
-    // the lit snow a few centimetres away; a wall of powder standing in its own
-    // shadow with air on both sides has no such neighbour, and leaving it at half
-    // strength was most of why the shadowed side stayed white.
-    // Strength well under the terrain's, and a wider scattering radius so the
-    // tint reaches the blue end at a lower thickness. Together those keep the
-    // backlit glow reading as light coming *through snow* rather than as the sun
-    // reflecting off something tan.
-    let sss = snowSubsurface(N, L, V, sun, thickness, uniforms.sssStrength * 0.45, 1.5);
+    // Transmission, coupled much harder to the shadow term than the ground
+    // material's is: a wall of thrown sand standing in its own shadow with air
+    // on both sides has no lit neighbour a few centimetres away to scatter light
+    // in from, unlike a shadowed hollow in the field.
+    //
+    // SANDSTORM: the multiplier here is cut hard relative to SNOWFLOW's — dry
+    // sand grains barely transmit at all, so the backlit "glowing lip" read
+    // that sold a thin edge of snow would just read as wet or glassy on sand.
+    // What is left is closer to a faint rim light than a translucency effect.
+    let sss = snowSubsurface(N, L, V, sun, thickness, uniforms.sssStrength * 0.15, 1.2);
     let sssTerm = sss * albedo * mix(0.18, 1.0, shadow);
     color += sssTerm;
 
@@ -234,7 +232,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     if (uniforms.spellLightCount > 0.5) {
         color += spellLighting(
             world, N, V, albedo, thickness,
-            uniforms.sssStrength * 0.45, 1.5,
+            uniforms.sssStrength * 0.15, 1.2,
             uniforms.spellLightPos, uniforms.spellLightCol, uniforms.spellLightCount
         );
     }
@@ -245,21 +243,19 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // brightness:
     //
     //  1. It scales the *finished radiance*, not the ambient. The textbook AO
-    //     scales ambient and leaves direct light alone, but in this scene the
-    //     ambient is where all the blue lives — the sky is strongly blue-shifted
-    //     by construction and the sun is a 13-degree beam at roughly 17:13:6.
-    //     Attenuating one and not the other does not darken a surface, it
-    //     re-weights a warm source against a cool one.
+    //     scales ambient and leaves direct light alone, but in this scene that
+    //     is wrong whenever the ambient and the sun disagree strongly in colour:
+    //     attenuating one and not the other does not darken a surface, it
+    //     re-weights one source against the other.
     //
-    //  2. Wherever it *does* darken, it goes blue in proportion. A surface that
-    //     dims without shifting hue drops below the tonemapper's desaturating
-    //     shoulder still carrying the sun's warmth, and lands on tan. Snow does
-    //     not do that: light reaching into a fold of snow has scattered through
-    //     snow to get there, and snow absorbs red over any appreciable path,
-    //     which is why a real snow cave is blue and not grey. Tying the tint to
-    //     the darkening rather than to `barrel` directly means the two can never
-    //     drift apart.
-    let caveTint = mix(vec3f(1.0), vec3f(0.55, 0.72, 1.0), (1.0 - occ) * 0.95);
+    //  2. Wherever it *does* darken, it shifts toward the sky's own colour
+    //     rather than a hardcoded one — the same reasoning and the same
+    //     `shIrradiance` lookup the ground material's `caveTint` uses. Sand does
+    //     not transmit light the way snow did; the inside of a curl is dark
+    //     because it is shadowed and mostly sky-lit, not because light
+    //     scattered *through* grain to get there.
+    let skyHue = shIrradiance(vec3f(0.0, 1.0, 0.0), uniforms.shR);
+    let caveTint = mix(vec3f(1.0), skyHue / max(luma(skyHue), 1e-4), (1.0 - occ) * 0.55);
     color *= occ * caveTint;
 
     if (uniforms.glintIntensity > 0.001) {

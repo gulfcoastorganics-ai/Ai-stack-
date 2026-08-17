@@ -68,6 +68,10 @@ uniform glintIntensity: f32;
 uniform glintGrazing: f32;
 uniform sssStrength: f32;
 uniform sssRadius: f32;
+/// Seconds since load, unpaused unless `freezeTime` is on. Drives the one
+/// animated thing in this material: the wind-driven surface sand streaks.
+uniform time: f32;
+uniform windStrength: f32;
 
 uniform fogDensity: f32;
 uniform fogHeightFalloff: f32;
@@ -480,6 +484,35 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         color += sunRadiance * g * shadow * (1.0 - iceAmount * 0.6) * 0.55;
     }
 
+    // ---- wind-driven surface sand -------------------------------------------
+    // Thin streams of grain skimming downwind across exposed dune crests, and
+    // almost none of it on sheltered lee faces — reusing the `exposure` channel
+    // the sastrugi cross-fade already reads (baked from landform curvature)
+    // rather than a second analytic gate, so "near a ridge crest" means the
+    // same thing here that it means everywhere else in this material. Cheap: a
+    // couple of moving noise taps, faded out by pixel footprint like every
+    // other fine layer in this shader so it never aliases into a shimmering
+    // carpet at distance, and it never reads on exposed rock.
+    if (uniforms.windStrength > 0.001 && rockExposed < 0.3) {
+        let streakFade = 1.0 - smoothstep(0.05, 0.4, footprint);
+        if (streakFade > 0.001) {
+            let wdir = vec2f(sin(uniforms.windAngle), cos(uniforms.windAngle));
+            // Compressed along the wind and scrolled with it, so the streaks
+            // read as motion rather than as a static speckle painted on.
+            let alongWind = dot(world.xz, wdir);
+            let acrossWind = dot(world.xz, vec2f(wdir.y, -wdir.x));
+            let flow = uniforms.time * uniforms.windStrength * 3.4;
+            let streakA = noise2(vec2f(acrossWind * 2.6, alongWind * 0.35 - flow)) * 0.5 + 0.5;
+            let streakB = noise2(vec2f(acrossWind * 9.0, alongWind * 1.4 - flow * 2.2)) * 0.5 + 0.5;
+            let grains = smoothstep(0.62, 0.95, streakA * 0.6 + streakB * 0.4);
+            // `exposure` is near 1 on scoured ridges and near 0 in sheltered
+            // hollows — exactly where real wind lofts sand and exactly where
+            // it does not.
+            let gate = smoothstep(0.35, 0.85, exposure) * uniforms.windStrength * streakFade;
+            color += grains * gate * sunRadiance * INV_PI * shadow * 0.10;
+        }
+    }
+
     // ---- occlusion, applied last and to everything -------------------------
     //
     // Two rules, the same two the surf wake's fragment shader carries. Both are
@@ -487,21 +520,25 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     //
     //  1. It scales the *finished radiance*, not the ambient. The textbook says
     //     occlusion darkens ambient and leaves direct light alone, and in this
-    //     scene that is actively wrong: the ambient is where all the blue lives —
-    //     the sky is strongly blue-shifted by construction — and the sun is a
-    //     13-degree beam at roughly 17:13:6. Attenuating one and not the other
-    //     does not darken a surface, it re-weights a cool source against a warm
-    //     one. A trench floor at 40% ambient and 100% sun is not a dark trench,
-    //     it is a *brown* trench, and it lands there because AgX stops rolling
-    //     saturation off half a stop below its shoulder.
+    //     scene that is actively wrong when the sky is strongly colour-shifted by
+    //     construction and the sun is a 13-degree beam at roughly 17:13:6.
+    //     Attenuating one and not the other does not darken a surface, it
+    //     re-weights a cool source against a warm one. A trench floor at 40%
+    //     ambient and 100% sun is not a dark trench, it is a differently-coloured
+    //     trench, and it lands there because AgX stops rolling saturation off
+    //     half a stop below its shoulder.
     //
-    //  2. Wherever it does darken, it goes blue in proportion. Light reaching
-    //     into a hollow in snow has scattered through snow to get there, and snow
-    //     absorbs red over any appreciable path — which is why a real snow cave
-    //     is blue and not grey. The tint is the same `deepTint` the subsurface
-    //     term uses, and tying it to the darkening rather than to `deformDepth`
-    //     means the two can never drift apart.
-    let caveTint = mix(vec3f(1.0), vec3f(0.55, 0.72, 1.0), (1.0 - ao) * 0.95);
+    //  2. Wherever it does darken, it shifts toward the sky's own colour, not a
+    //     hardcoded one. Sand does not transmit light the way snow's mean free
+    //     path did — a sun-baked hollow is dark because it is opaque and mostly
+    //     lit by the sky reaching in from above, not because light scattered
+    //     *through* the grain the way it did through snow. Deriving the tint
+    //     from the same `shIrradiance` lookup the ambient term above already
+    //     uses means this material carries no hardcoded snow-blue constant and
+    //     tracks whatever the sky actually is, including once the atmosphere
+    //     itself is converted to a desert sky in a later pass.
+    let skyHue = shIrradiance(vec3f(0.0, 1.0, 0.0), uniforms.shR);
+    let caveTint = mix(vec3f(1.0), skyHue / max(luma(skyHue), 1e-4), (1.0 - ao) * 0.55);
     color *= ao * caveTint;
 
     // ------------------------------------------------------- aerial perspective

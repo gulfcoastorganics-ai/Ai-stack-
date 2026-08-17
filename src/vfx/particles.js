@@ -1,11 +1,19 @@
 /**
- * Snow spray — a pooled, CPU-simulated, GPU-billboarded particle system.
+ * Sand spray — a pooled, CPU-simulated, GPU-billboarded particle system.
  *
- * One system serves every source of airborne snow in the demo: footfalls now,
- * the snow-surf plume and the spell spray later. That is deliberate. A separate
- * emitter per effect means separate pipelines, separate warm-up, separate
- * sorting, and five slightly different ideas about what lit snow powder looks
- * like. There is one pipeline here and one lighting model.
+ * SANDSTORM note: this is SNOWFLOW's snow spray, carried over unchanged in
+ * architecture — one pool, one pipeline, CPU simulation with GPU billboard
+ * expansion. Only the per-grain physics below (wind coupling, fall speed, puff
+ * growth) and the shading in `spray.fragment.wgsl` moved from snow to sand.
+ * Also gained one more emission source this phase: `_ambientDrift`, a sparse,
+ * rate-limited scan for exposed dune crests near the camera that lofts a few
+ * grains downwind on its own, the way wind picks sand off a ridge without the
+ * player doing anything. Everything else about it still serves every source of
+ * airborne sand in the demo: footfalls, the dune-surf plume, ambient wind, and
+ * the spells later. That is deliberate. A separate emitter per effect means
+ * separate pipelines, separate warm-up, separate sorting, and several slightly
+ * different ideas about what lit sand looks like. There is one pipeline here
+ * and one lighting model.
  *
  * Simulation is on the CPU because the particle count is small (a footfall is
  * eighteen grains) and the alternative — a compute pass plus indirect draw —
@@ -49,8 +57,16 @@ import { SPELL_LIGHT_UNIFORMS } from "../spells/spellLights.js";
  */
 const CAPACITY = 5120;
 
-/** Terminal fall speed of a snow grain, m/s. Drag is tuned to land here. */
-const TERMINAL = 1.9;
+/**
+ * Terminal fall speed of a sand grain, m/s. Drag is tuned to land here.
+ *
+ * Raised from SNOWFLOW's 1.9 (a snow flake's terminal speed): mineral grains
+ * are denser than ice crystals and fall — and therefore settle back toward the
+ * ground — faster, which is also what "denser close to the ground" asks for:
+ * a spray population that pulls itself back down instead of hanging in the
+ * air the way snow powder does.
+ */
+const TERMINAL = 2.6;
 
 const _right = new Vector3();
 const _up = new Vector3();
@@ -111,6 +127,8 @@ export class SprayField {
 
         this._camPos = new Vector3();
         this._t = 0;
+        /** Seconds until `_ambientDrift` is next allowed to fire. */
+        this._driftClock = 0;
     }
 
     _makeMaterial() {
@@ -190,10 +208,16 @@ export class SprayField {
         this._t += dt;
         this._camPos.copyFrom(cameraPos);
 
+        this._ambientDrift(dt, cameraPos);
+
         const h = Math.min(dt, 1 / 30);
         const wa = (S.windDirection * Math.PI) / 180;
-        const wx = Math.sin(wa) * 2.4 * S.windStrength;
-        const wz = Math.cos(wa) * 2.4 * S.windStrength;
+        // Sand is pushed by the wind harder than snow was — raised from
+        // SNOWFLOW's 2.4 m/s reference — which is most of "more affected by
+        // prevailing wind": a dust grain snaps toward the wind's own velocity
+        // much faster once its own launch energy bleeds off.
+        const wx = Math.sin(wa) * 4.0 * S.windStrength;
+        const wz = Math.cos(wa) * 4.0 * S.windStrength;
 
         const d = this._texData;
         let live = 0;
@@ -227,8 +251,8 @@ export class SprayField {
             this.pos[o + 1] += this.vel[o + 1] * h;
             this.pos[o + 2] += this.vel[o + 2] * h;
 
-            // Settle on the snow instead of falling through it. The grain does
-            // not bounce — it is snow landing on snow — it just stops and fades.
+            // Settle on the sand instead of falling through it. The grain does
+            // not bounce — it is sand landing on sand — it just stops and fades.
             const g = this.terrain.heightAt(this.pos[o], this.pos[o + 2]);
             if (this.pos[o + 1] < g) {
                 this.pos[o + 1] = g;
@@ -237,8 +261,11 @@ export class SprayField {
                 this.age[i] += h * 2.5;
             }
 
-            // Puffs expand as they disperse; clods do not.
-            const grow = this.kind[i] > 0.5 ? 1.0 : 1.0 + a01 * 1.3;
+            // Puffs expand as they disperse, but far less than snow powder did —
+            // sand dust stays a tighter, more directional streak instead of
+            // blooming into a fluffy cloud, which is most of "more directional"
+            // for the fine-dust population. Clods do not expand at all.
+            const grow = this.kind[i] > 0.5 ? 1.0 : 1.0 + a01 * 0.55;
             // Fade in fast, out slowly.
             const alpha =
                 Math.min(1, a01 * 8) * (1 - a01) * (1 - a01);
@@ -257,6 +284,72 @@ export class SprayField {
         this.liveCount = live;
         this.dataTex.update(d);
         this._pushUniforms();
+    }
+
+    /**
+     * Wind picking sand off an exposed dune crest, with nobody involved.
+     *
+     * A sparse, rate-limited scan of a handful of points around the camera
+     * rather than a field-wide system: only points near the camera are worth
+     * the cost, since anything far enough away to be irrelevant to the frame
+     * is also too small on screen to read as individual grains. Gated on the
+     * same `exposure` channel the ground material's sastrugi cross-fade and the
+     * deformation buffer's downhill migration both read — "1 on scoured
+     * crests, 0 in sheltered hollows" from `auxBake.fragment.wgsl` — so a lee
+     * face gets significantly less transport for free, without a second
+     * analytic wind-exposure model to keep in sync with the terrain generator.
+     *
+     * Reuses the existing pooled particle system entirely: no new draw call, no
+     * new pipeline, just a handful of extra `emit()` calls a few times a
+     * second.
+     */
+    _ambientDrift(dt, cameraPos) {
+        if (S.windStrength <= 0.05) {
+            this._driftClock = 0;
+            return;
+        }
+        this._driftClock += dt;
+        const INTERVAL = 0.12;
+        if (this._driftClock < INTERVAL) return;
+        this._driftClock -= INTERVAL;
+
+        const wa = (S.windDirection * Math.PI) / 180;
+        const wx = Math.sin(wa);
+        const wz = Math.cos(wa);
+
+        const TRIES = 5;
+        for (let i = 0; i < TRIES; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const r = 6 + Math.random() * 16;
+            const x = cameraPos.x + Math.cos(ang) * r;
+            const z = cameraPos.z + Math.sin(ang) * r;
+
+            // Crest gate. Well above the sastrugi cross-fade's own midpoint —
+            // ambient drift should read as "the wind is doing something to the
+            // sharp edges of this field", not paint every gentle rise.
+            const exposure = this.terrain.exposureAt(x, z);
+            if (exposure < 0.62) continue;
+
+            const y = this.terrain.heightAt(x, z);
+            const n = 1 + ((Math.random() * 2) | 0);
+            for (let k = 0; k < n; k++) {
+                const jx = (Math.random() - 0.5) * 1.2;
+                const jz = (Math.random() - 0.5) * 1.2;
+                // Low and mostly horizontal — this is grain skimming off a
+                // ridge downwind, not a plume being thrown, so it stays close
+                // to the ground and carries little vertical energy.
+                this.emit(
+                    x + jx, y + 0.05 + Math.random() * 0.25, z + jz,
+                    wx * (1.2 + Math.random() * 1.6) * S.windStrength,
+                    0.15 + Math.random() * 0.5,
+                    wz * (1.2 + Math.random() * 1.6) * S.windStrength,
+                    0.009 + Math.random() * 0.012,
+                    1.0 + Math.random() * 1.2,
+                    0,
+                    2.2
+                );
+            }
+        }
     }
 
     _pushUniforms() {

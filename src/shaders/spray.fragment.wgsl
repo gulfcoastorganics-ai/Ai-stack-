@@ -1,9 +1,12 @@
 // -----------------------------------------------------------------------------
-// Snow spray.
+// Sand spray.
 //
-// Airborne snow is not a fogged sprite. It is a cloud of ice crystals, and the
-// two things that make it read are the two things a plain alpha billboard
-// leaves out:
+// SANDSTORM: SNOWFLOW's pooled snow-particle billboard, retinted and retuned
+// for sand — see the `kind`-based albedo below and the emission-site tuning in
+// `particles.js`, `character/snowContact.js` and `vfx/surfWake.js`. Airborne
+// sand is not a fogged sprite. It is a cloud of mineral grains, warmer and
+// denser-looking than snow's ice crystals, and the two things that make it
+// read are the two things a plain alpha billboard leaves out:
 //
 //   forward scatter   Looking toward the sun through a puff, it is *brighter*
 //                     than the snow behind it and it is warm. Looking down-sun
@@ -106,10 +109,17 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let sun = uniforms.sunRadiance;
     const INV_PI: f32 = 0.31830988618;
 
-    // Snow crystals in air scatter almost isotropically at the surface and very
-    // strongly forward through the volume, so both terms are needed.
-    let albedo = vec3f(0.92, 0.94, 0.98);
-    let diff = wrapDiffuse(dot(N, L), 0.75);
+    // Sand grains in air scatter almost isotropically at the surface and still
+    // forward-scatter through the volume, so both terms are kept, but the
+    // colour moves off snow's cool near-white onto warm ochre — no white
+    // particles anywhere in this material. Fine airborne dust (`kind` 0) reads
+    // lighter and more desaturated, the way suspended dust does; heavier
+    // ballistic grains and clods (`kind` 1) are darker and more saturated,
+    // closer to the ground material's own loose-sand colour.
+    let dustCol = vec3f(0.80, 0.68, 0.52);
+    let clodCol = vec3f(0.62, 0.47, 0.30);
+    let albedo = mix(dustCol, clodCol, kind);
+    let diff = wrapDiffuse(dot(N, L), 0.65);
     var color = albedo * INV_PI * sun * diff * shadow;
 
     // Forward scatter through the puff. `mu` is 1 looking straight into the sun.

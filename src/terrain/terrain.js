@@ -51,8 +51,13 @@ export class Terrain {
 
         this.heightfield = new Heightfield(scene);
 
+        /** Seconds of unpaused simulation time, banked locally so the material
+         * can animate the wind-driven surface sand streaks without `update`'s
+         * caller having to know this material needs a clock. */
+        this._time = 0;
+
         /** The terrain state buffer. Feet, the surf wake and every spell write here. */
-        this.deform = new DeformationField(scene);
+        this.deform = new DeformationField(scene, this.heightfield);
 
         // Generated snow grain, tiled at three world scales by the material.
         this.detailTex = new ProceduralTexture(
@@ -106,6 +111,7 @@ export class Terrain {
                     "fogDensity", "fogHeightFalloff", "fogStart", "aerialStrength",
                     "deformCenter", "deformSize", "deformTexel", "deformDepthScale",
                     "ambientIntensity", "debugMode", "screenSize",
+                    "time", "windStrength",
                     ...SPELL_LIGHT_UNIFORMS,
                 ],
                 samplers: [
@@ -261,6 +267,7 @@ export class Terrain {
         const m = this.material;
         const hf = this.heightfield;
         const windAngle = (S.windDirection * Math.PI) / 180;
+        this._time += dt;
 
         // Simulate first, then bind: the material must sample the target that
         // was written this frame, not the one from last frame, or every mark
@@ -285,6 +292,8 @@ export class Terrain {
         m.setFloat("worldSize", hf.size);
         m.setFloat("heightRes", 4096);
         m.setFloat("windAngle", windAngle);
+        m.setFloat("time", this._time);
+        m.setFloat("windStrength", S.windStrength);
         m.setFloat("macroAmp", S.macroHeightScale);
         m.setFloat("sastrugiAmp", S.sastrugiStrength);
 
@@ -379,6 +388,11 @@ export class Terrain {
     /** @param {number} x @param {number} z @param {Vector3} out */
     normalAt(x, z, out) {
         return this.heightfield.normalAt(x, z, out);
+    }
+
+    /** @param {number} x @param {number} z */
+    exposureAt(x, z) {
+        return this.heightfield.exposureAt(x, z);
     }
 
     dispose() {

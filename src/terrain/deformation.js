@@ -1,5 +1,12 @@
 /**
- * The terrain state buffer — persistent, additive snow deformation.
+ * The terrain state buffer — persistent, additive sand deformation.
+ *
+ * SANDSTORM note: this is SNOWFLOW's snow deformation buffer carried over
+ * unchanged in structure — same two RGBA16F ping-pong targets, same channel
+ * count, same toroidal addressing, same one-pass-per-frame architecture. Only
+ * `deformSim.fragment.wgsl`'s relaxation constants and the channel semantics
+ * (R depression, G displaced loose sand, B compaction, A sun-baked crust) have
+ * been reinterpreted for granular sand — see the header comment there.
  *
  * Two RGBA16F targets ping-ponged by one full-screen pass per frame
  * (`deformSim.fragment.wgsl`). The pass scrolls, relaxes and splats in a single
@@ -10,9 +17,9 @@
  *   snapped to texel boundaries so the field does not swim under the surface.
  *   Addressing is toroidal, so following the player costs nothing.
  *
- * Everything that touches the snow writes here through `brush()` — feet, the
+ * Everything that touches the sand writes here through `brush()` — feet, the
  * surf wake, every spell. That shared write path is what makes the effects part
- * of the snow rather than decals floating above it.
+ * of the sand rather than decals floating above it.
  *
  * Allocation: none per frame. The brush staging array is sized once at
  * construction and written in place.
@@ -45,9 +52,17 @@ const MAX_BRUSHES = 96;
 const RELAX_STEP = 0.4;
 
 export class DeformationField {
-    /** @param {import("@babylonjs/core/scene").Scene} scene */
-    constructor(scene) {
+    /**
+     * @param {import("@babylonjs/core/scene").Scene} scene
+     * @param {import("./heightfield.js").Heightfield} [heightfield] the macro
+     *   landform, if available. Its baked slope (aux texture RG) drives the
+     *   downhill migration term the sim uses to relax loose sand toward its
+     *   angle of repose — see `deformSim.fragment.wgsl`. Optional so this class
+     *   still works standalone (e.g. in isolated tests) without it.
+     */
+    constructor(scene, heightfield) {
         this.scene = scene;
+        this.heightfield = heightfield || null;
         this.res = Math.max(512, S.deformResolution | 0);
         this.size = COVERAGE;
         this.texel = this.size / this.res;
@@ -123,6 +138,14 @@ export class DeformationField {
         // bandwidth.
         pt.autoClear = false;
         pt.setTexture("brushTex", this.brushTex);
+        // Macro slope for the downhill migration term. Constant for the life of
+        // the field — the heightfield never moves — so it is bound once here
+        // rather than re-set every frame like the brush texture's contents.
+        if (this.heightfield) {
+            pt.setTexture("auxTex", this.heightfield.auxTex);
+            pt.setVector2("worldOrigin", this.heightfield.origin);
+            pt.setFloat("worldSize", this.heightfield.size);
+        }
         return pt;
     }
 

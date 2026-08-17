@@ -1,19 +1,28 @@
 /**
- * The snow-surf wake — the centrepiece.
+ * The dune-surf wake — the centrepiece.
+ *
+ * SANDSTORM note: this is SNOWFLOW's snow-surf wake module, carried over with
+ * the same swept-mesh/spine architecture. Only the cross-section shape it
+ * sweeps (`lib/wake.wgsl`), the material it is shaded with (`wake.fragment.wgsl`)
+ * and the sand it sheds (`particles.js`) have been reworked — the code here
+ * that builds and resamples the spine, and decides how amplitude and curl
+ * split between the two sides of a carve, is unchanged.
  *
  * Three things come out of this module and they are deliberately one system:
  *
- *   the wave    a swept mesh built from the path the board has taken, shaped as
- *               a breaking wave that rises just behind the bow, curls over, and
- *               collapses into powder about nine tenths of a second later.
- *   the plume   spray thrown off the lip of that wave, emitted from the crest
+ *   the wall    a swept mesh built from the path the board has taken, shaped
+ *               as a cresting bank of displaced sand that rises just behind
+ *               the bow, leans over without curling into a hollow tube, and
+ *               collapses into loose grain about nine tenths of a second
+ *               later.
+ *   the plume   spray thrown off the lip of that wall, emitted from the crest
  *               position the mesh is actually drawing rather than from the
  *               player's feet.
  *   the crest   the bow. The two walls converge just ahead of the boots, so the
- *               pair reads as snow splitting around something moving through it.
+ *               pair reads as sand splitting around something moving through it.
  *
  * They are one system because they share one spine. A plume emitted from an
- * independent guess at where the wave is will drift out of register with it the
+ * independent guess at where the wall is will drift out of register with it the
  * moment the player turns, and the failure is not subtle — the spray comes off
  * the wrong side of a carve.
  *
@@ -533,18 +542,20 @@ export class SurfWake {
                 const py = sy + (0.30 + 0.82 * Math.sqrt(Math.random())) * amp;
 
                 // ---- curtain ------------------------------------------------
-                // Big, slow, short-lived, high drag. A puff of blown snow is a
-                // cloud rather than a crystal, and at the distance this is framed
-                // from it has to be twenty to forty centimetres across to be a
-                // shape at all. It dies before it can drift far enough for the
-                // size to look wrong.
+                // Big, slow, short-lived, high drag. A curtain of blown sand
+                // hangs lower than a snow puff did — launch heights are cut
+                // back from SNOWFLOW's, and the raised particle `TERMINAL` in
+                // particles.js pulls it back down faster besides — so the
+                // curtain hugs the crest rather than billowing above it. It
+                // dies before it can drift far enough for the size to look
+                // wrong.
                 if (Math.random() < 0.72) {
                     sp.emit(
                         px, py, pz,
                         rx * side * (0.4 + Math.random() * 1.1) + ch.velocity.x * 0.16,
-                        0.9 + Math.random() * 1.8,
+                        0.65 + Math.random() * 1.2,
                         rz * side * (0.4 + Math.random() * 1.1) + ch.velocity.z * 0.16,
-                        0.055 + Math.random() * 0.085,
+                        0.048 + Math.random() * 0.070,
                         0.34 + Math.random() * 0.40,
                         0,
                         4.5
@@ -553,6 +564,11 @@ export class SurfWake {
                 }
 
                 // ---- throw --------------------------------------------------
+                // Fast ballistic grains flung clear of the wall — still launched
+                // hard enough to clear it, but with less vertical energy than
+                // SNOWFLOW's snow throw carried, so the population as a whole
+                // stays lower and reads as sand rather than as powder hanging
+                // in the air.
                 const out = 1.2 + Math.random() * 2.6;
                 const back = 0.4 + Math.random() * 2.2;
                 const clod = Math.random() < 0.18 ? 1 : 0;
@@ -560,19 +576,19 @@ export class SurfWake {
                 sp.emit(
                     px, py, pz,
                     rx * side * out - fx * back + ch.velocity.x * 0.30,
-                    1.6 + Math.random() * 3.4 + amp * 1.5,
+                    1.2 + Math.random() * 2.6 + amp * 1.1,
                     rz * side * out - fz * back + ch.velocity.z * 0.30,
-                    clod ? 0.020 + Math.random() * 0.022 : 0.045 + Math.random() * 0.055,
+                    clod ? 0.015 + Math.random() * 0.018 : 0.036 + Math.random() * 0.045,
                     clod ? 0.7 + Math.random() * 0.5 : 0.9 + Math.random() * 1.3,
                     clod,
-                    // Ballistic. This is a mass of snow leaving a wave, and it
-                    // has to actually clear the wave — see `drag` in particles.js.
+                    // Ballistic. This is a mass of sand leaving the wall, and it
+                    // has to actually clear the wall — see `drag` in particles.js.
                     clod ? 0.7 : 1.0 + Math.random() * 0.8
                 );
             }
         }
 
-        // A separate, slower stream of fine powder hanging low over the trench.
+        // A separate, slower stream of fine dust hanging low over the trench.
         // The lip spray is all ballistic and gone in a second; this is the part
         // that leaves the trail looking like it is still smoking.
         const driftPerMetre = 7 * S.wakeSpray;

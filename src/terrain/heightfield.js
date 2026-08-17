@@ -212,6 +212,27 @@ export class Heightfield {
         return out;
     }
 
+    /**
+     * CPU mirror of the GPU exposure estimate `auxBake.fragment.wgsl` bakes
+     * into the aux texture's alpha channel: positive on convex crests, negative
+     * in concave hollows, from the same wide-stencil Laplacian. Not read every
+     * frame — only where something on the CPU needs to gate itself by "is this
+     * a dune crest or a sheltered pocket" without a texture readback, which for
+     * SANDSTORM is the ambient wind-drift particle emitter deciding where sand
+     * is actually being lofted off a ridge versus sitting still in a lee face.
+     * @param {number} x @param {number} z
+     */
+    exposureAt(x, z) {
+        const w = (this.cpuTexel || 1) * 6;
+        const c = this.heightAt(x, z);
+        const l = this.heightAt(x - w, z);
+        const r = this.heightAt(x + w, z);
+        const d = this.heightAt(x, z - w);
+        const u = this.heightAt(x, z + w);
+        const lap = (l + r + d + u - 4 * c) / (w * w);
+        return clamp01(0.5 - lap * 2.2);
+    }
+
     /** Clamp a world position to the playable area, in place. */
     clampToPlayArea(v) {
         const r = PLAY_RADIUS;
@@ -244,4 +265,8 @@ function bsplineWeights(t, out) {
 
 function clampi(v, lo, hi) {
     return v < lo ? lo : v > hi ? hi : v;
+}
+
+function clamp01(v) {
+    return v < 0 ? 0 : v > 1 ? 1 : v;
 }
