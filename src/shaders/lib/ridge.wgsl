@@ -43,7 +43,17 @@ fn ridgeCeiling(amp: f32) -> f32 {
 /// a slow massif field decides *where there is a range at all*, so the horizon
 /// gets massifs and gaps and long low saddles instead of an unbroken row of
 /// triangles.
-fn ridgeField(p: vec2f, amp: f32) -> vec3f {
+///
+/// SANDSTORM Phase 4: `windAngle` gives the peak layer a mild anisotropic
+/// stretch — compressed along the prevailing wind, stretched across it — so
+/// the far range's ridge lines run with the same orientation the near dune
+/// field's do, rather than the wind-independent isotropic peaks SNOWFLOW's
+/// alpine range used. The peak-sharpening bias is also softened from a cubic
+/// to a quadratic, trading knife-edge alpine spires for rounder desert
+/// massif/mesa silhouettes — the range does not need to reproduce dunes at
+/// 10-45 km, only to stop reading as a snowy mountain range sitting behind a
+/// desert.
+fn ridgeField(p: vec2f, amp: f32, windAngle: f32) -> vec3f {
     // Kilometres. The whole range is authored at this scale.
     let q = p * 0.001;
     let kq = 0.001;
@@ -97,25 +107,45 @@ fn ridgeField(p: vec2f, amp: f32) -> vec3f {
     let w2 = noised(q * 0.26 + vec2f(19.4, 3.6));
     let qw = q + vec2f(w1.x, w2.x) * 1.35;
 
+    // ---- wind-aligned anisotropy --------------------------------------------
+    // Mild on purpose — this is a distant silhouette, not literal dune
+    // geometry, and the ridged-noise peaks below already carry their own
+    // domain warp for irregularity. Just enough stretch that the range's
+    // grain agrees with the dune field's rather than reading as an unrelated,
+    // unoriented mountain range that happens to sit behind it.
+    let wdir = vec2f(sin(windAngle), cos(windAngle));
+    let wperp = vec2f(wdir.y, -wdir.x);
+    let kAlong = 1.35;
+    let kAcross = 0.80;
+    let qa = vec2f(dot(qw, wdir) * kAlong, dot(qw, wperp) * kAcross);
+
     // ---- the peaks ---------------------------------------------------------
     // Four octaves, not three. At three the lowest octave dominates and the
     // range reads as smooth meringue mounds: no crest line anywhere, and a
     // mountain without a crest line has no scale.
-    let r = ridgedd(qw * 0.30, 4, 2.09, 0.50);
+    let r = ridgedd(qa * 0.30, 4, 2.09, 0.50);
     let rk = 0.30 * kq;
     // A second, finer set at a different phase. One ridged stack alone gives
     // every peak the same profile; two at incommensurate scales does not.
-    let s = ridgedd(qw * 1.05 + vec2f(31.0, 17.0), 3, 2.11, 0.50);
+    let s = ridgedd(qa * 1.05 + vec2f(31.0, 17.0), 3, 2.11, 0.50);
     let sk = 1.05 * kq;
 
     let raw = r.x * 0.78 + s.x * 0.22;
-    let draw = r.yz * (0.78 * rk) + s.yz * (0.22 * sk);
+    // Gradient mapped back from the (along-wind, across-wind) basis `qa` is
+    // expressed in to world (x, z): d/dp = d/d(along)*wdir + d/d(across)*wperp,
+    // which for this linear a stretch is exact — nothing new approximated
+    // here beyond the pre-existing warp-Jacobian approximation above.
+    let gr = kAlong * wdir * r.y + kAcross * wperp * r.z;
+    let gs = kAlong * wdir * s.y + kAcross * wperp * s.z;
+    let draw = gr * (0.78 * rk) + gs * (0.22 * sk);
 
-    // Sharpen the crests and widen the valleys. Ridged noise squares its ridge
-    // term, which rounds the top and is right for sastrugi; a mountain wants the
-    // opposite bias. Chain-ruled so the normals follow.
-    let peaks = raw * raw * raw * 0.55 + raw * 0.45;
-    let dpeaks = draw * (3.0 * raw * raw * 0.55 + 0.45);
+    // Sharpen the crests and widen the valleys, but gently — a quadratic
+    // bias rather than SNOWFLOW's cubic one. Ridged noise squares its ridge
+    // term, which rounds the top; a mountain wants the opposite bias, but a
+    // desert massif wants *less* of it than an alpine spire did. Chain-ruled
+    // so the normals follow.
+    let peaks = raw * raw * 0.50 + raw * 0.50;
+    let dpeaks = draw * (2.0 * raw * 0.50 + 0.50);
 
     // A *small* floor under the envelope: low foothills in the gaps between
     // massifs rather than absolute nothing, which reads as a cut-out.
@@ -154,7 +184,7 @@ struct RidgeHit {
 /// Steps grow geometrically, which is the right distribution for a field whose
 /// features subtend a roughly constant angle: a fixed step wastes most of its
 /// samples in the far half where a kilometre is a pixel.
-fn ridgeMarch(camPos: vec3f, dir: vec3f, amp: f32) -> RidgeHit {
+fn ridgeMarch(camPos: vec3f, dir: vec3f, amp: f32, windAngle: f32) -> RidgeHit {
     var out: RidgeHit;
     out.hit = false;
     out.dist = 0.0;
@@ -194,13 +224,13 @@ fn ridgeMarch(camPos: vec3f, dir: vec3f, amp: f32) -> RidgeHit {
     // looks like a shading bug and is arithmetic.
     var prevD = D_NEAR;
     var prevGap = camPos.y + slope * D_NEAR
-                - (ridgeField(camPos.xz + step * D_NEAR, amp).x - ridgeDrop(D_NEAR));
+                - (ridgeField(camPos.xz + step * D_NEAR, amp, windAngle).x - ridgeDrop(D_NEAR));
 
     if (prevGap < 0.0) {
         // Started inside the near face. That is a legitimate hit, at D_NEAR.
         out.dist = D_NEAR;
         out.pos = camPos.xz + step * D_NEAR;
-        let f = ridgeField(out.pos, amp);
+        let f = ridgeField(out.pos, amp, windAngle);
         out.height = f.x - ridgeDrop(D_NEAR);
         out.normal = normalize(vec3f(-f.y, 1.0, -f.z));
         out.hit = true;
@@ -211,7 +241,7 @@ fn ridgeMarch(camPos: vec3f, dir: vec3f, amp: f32) -> RidgeHit {
 
     for (var i = 1; i < STEPS; i++) {
         let p = camPos.xz + step * d;
-        let h = ridgeField(p, amp).x - ridgeDrop(d);
+        let h = ridgeField(p, amp, windAngle).x - ridgeDrop(d);
         let rayY = camPos.y + slope * d;
         let gap = rayY - h;
 
@@ -224,7 +254,7 @@ fn ridgeMarch(camPos: vec3f, dir: vec3f, amp: f32) -> RidgeHit {
             out.dist = mix(prevD, d, clamp(t, 0.0, 1.0));
             out.pos = camPos.xz + step * out.dist;
 
-            let f = ridgeField(out.pos, amp);
+            let f = ridgeField(out.pos, amp, windAngle);
             out.height = f.x - ridgeDrop(out.dist);
             out.normal = normalize(vec3f(-f.y, 1.0, -f.z));
             out.hit = true;
@@ -251,7 +281,7 @@ fn ridgeMarch(camPos: vec3f, dir: vec3f, amp: f32) -> RidgeHit {
 /// describe a penumbra that, at twenty kilometres, is a fraction of a pixel — and
 /// what this term is actually for is the large-scale read of which flank of a
 /// massif is in the shade of the one in front of it.
-fn ridgeShadow(pos: vec2f, height: f32, sunDir: vec3f, amp: f32) -> f32 {
+fn ridgeShadow(pos: vec2f, height: f32, sunDir: vec3f, amp: f32, windAngle: f32) -> f32 {
     let hl = length(sunDir.xz);
     if (hl < 1e-3 || sunDir.y <= 0.0) { return 1.0; }
 
@@ -260,7 +290,7 @@ fn ridgeShadow(pos: vec2f, height: f32, sunDir: vec3f, amp: f32) -> f32 {
 
     var d = 420.0;
     for (var i = 0; i < 4; i++) {
-        let h = ridgeField(pos + step * d, amp).x;
+        let h = ridgeField(pos + step * d, amp, windAngle).x;
         if (h > height + slope * d) { return 0.0; }
         d *= 2.6;
     }

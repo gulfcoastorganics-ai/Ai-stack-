@@ -1,6 +1,6 @@
-// Derives everything the snow material needs to know about the macro landform
-// that isn't the height itself, by differentiating the *baked* height texture
-// rather than the analytic function.
+// Derives everything the ground material needs to know about the macro
+// landform that isn't the height itself, by differentiating the *baked*
+// height texture rather than the analytic function.
 //
 // Differentiating the bake (instead of re-evaluating terrainMacroD) guarantees
 // the normals describe the exact surface the vertex shader displaces to. If the
@@ -9,7 +9,7 @@
 //
 // Output channels:
 //   R,G  dH/dx, dH/dz in metres per metre
-//   B    rock mask, 0 = snow, 1 = bare rock
+//   B    rock mask, 0 = sand, 1 = bare rock
 //   A    exposure: 1 on scoured crests, 0 in sheltered hollows
 
 varying vUV: vec2f;
@@ -50,12 +50,22 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let lU = textureSample(heightTex, heightTexSampler, uv + vec2f(0.0, w)).x;
     let lap = (lL + lR + lD + lU - 4.0 * hC.x) / (wd * wd);
 
-    // -lap so crests come out positive. The scale is set against the actual
-    // curvature of the dune field: 15 m of relief at a ~58 m wavelength gives a
-    // second derivative around 0.18 m^-1, so this has to be near 1/0.18 to
-    // produce a usable gradient. Anything larger saturates to a hard 0/1 mask
-    // and the sastrugi cross-fade it drives stops being a cross-fade at all.
-    let exposure = clamp(0.5 - lap * 2.2, 0.0, 1.0);
+    // -lap so crests come out positive.
+    //
+    // SANDSTORM Phase 4: the macro landform's crests are now genuine slope
+    // kinks (see `duneShape01` in `lib/terrain.wgsl`) rather than smoothly
+    // rounded fBm peaks, so the same wide stencil now measures noticeably
+    // higher curvature at a crest than SNOWFLOW's snow field did. The scale
+    // below is retuned down from SNOWFLOW's 2.2 accordingly, so a typical
+    // dune crest still lands short of hard saturation and the exposure field
+    // stays a genuine 0..1 gradient — every consumer of it (the ground
+    // material's sastrugi cross-fade, the Phase 2 downhill-migration term,
+    // the Phase 2 ambient wind-drift particle gate) needs graded values, not
+    // a binary mask. This is an estimate consistent with the new terrain's
+    // amplitude/wavelength targets, not a measured constant — see the browser
+    // checklist for confirming crests read as scoured/bright without washing
+    // out mid-slope shading.
+    let exposure = clamp(0.5 - lap * 1.3, 0.0, 1.0);
 
     fragmentOutputs.color = vec4f(dHdx, dHdz, hC.y, exposure);
 }

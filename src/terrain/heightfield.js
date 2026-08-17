@@ -94,6 +94,9 @@ export class Heightfield {
         this.heightTex.setFloat("worldSize", this.size);
         this.heightTex.setFloat("windAngle", windAngle);
         this.heightTex.setFloat("heightAmp", S.macroHeightScale);
+        this.heightTex.setFloat("duneScale", S.duneScale);
+        this.heightTex.setFloat("leeSteepness", S.leeSteepness);
+        this.heightTex.setFloat("macroVariation", S.macroVariation);
         await bakeOnce(this.heightTex, "heightBake");
 
         // The aux bake differentiates the height bake, so it has to run after.
@@ -230,7 +233,10 @@ export class Heightfield {
         const d = this.heightAt(x, z - w);
         const u = this.heightAt(x, z + w);
         const lap = (l + r + d + u - 4 * c) / (w * w);
-        return clamp01(0.5 - lap * 2.2);
+        // Must track auxBake.fragment.wgsl's own `0.5 - lap * k` exactly — see
+        // that file's Phase 4 note on why `k` moved from SNOWFLOW's 2.2 down
+        // to the dune field's own value.
+        return clamp01(0.5 - lap * 1.3);
     }
 
     /** Clamp a world position to the playable area, in place. */

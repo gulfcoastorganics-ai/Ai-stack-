@@ -56,6 +56,24 @@ export const S = {
     macroHeightScale: 1.0,
     sastrugiStrength: 1.0,
 
+    // -------------------------------------------------------- dune generator
+    // Phase 4 art controls for the macro dune-field bake. Deliberately a
+    // handful of meaningful knobs rather than exposing every noise
+    // coefficient — see `lib/terrain.wgsl`'s `duneRidges`/`terrainRegionMask`
+    // for what each one actually drives. Takes effect on the next terrain
+    // bake (load, or a page refresh) — same as `macroHeightScale` and
+    // `windDirection` already did; there is no live-rebake path for either.
+    /** Base meso dune wavelength, metres. Individual dunes range roughly
+     *  0.3x-3x this depending on how dense the local dune field is. */
+    duneScale: 42,
+    /** Target tangent of the lee (slip-face) slope angle. 0.64 ≈ 32.6
+     *  degrees, close to dry sand's natural angle of repose. */
+    leeSteepness: 0.64,
+    /** 0 = one uniform mid-density dune field (closer to SNOWFLOW's original
+     *  single-noise-field character); 1 = full regional contrast between
+     *  dense dune country, barchan margins and open interdune flats. */
+    macroVariation: 0.85,
+
     // ----------------------------------------------------------- deformation
     deformDepth: 1.0,
     deformBerm: 1.0,
@@ -169,6 +187,17 @@ export const SCHEMA = [
             { k: "detailNormalStrength", l: "Detail normals", t: "f", min: 0, max: 2, step: 0.01 },
             { k: "macroHeightScale", l: "Dune height", t: "f", min: 0, max: 2, step: 0.01 },
             { k: "sastrugiStrength", l: "Ripple strength", t: "f", min: 0, max: 2, step: 0.01 },
+        ],
+    },
+    {
+        // Terrain-bake controls. Changes apply on the next bake (page
+        // refresh) — there is no live-rebake path, matching the existing
+        // "Dune height" slider above and `windDirection`.
+        group: "Dune Field",
+        items: [
+            { k: "duneScale", l: "Dune spacing", t: "f", min: 10, max: 150, step: 1 },
+            { k: "leeSteepness", l: "Slip-face angle", t: "f", min: 0.35, max: 0.85, step: 0.01 },
+            { k: "macroVariation", l: "Regional variety", t: "f", min: 0, max: 1, step: 0.01 },
         ],
     },
     {

@@ -58,7 +58,11 @@ fn shadeRidge(hit: RidgeHit, dir: vec3f) -> vec3f {
     let sand = vec3f(0.62, 0.49, 0.33);
     let albedo = mix(rock, sand, sandMask);
 
-    let shadow = ridgeShadow(hit.pos, hit.height, L, uniforms.ridgeAmp);
+    // Same angle `windDir` already encodes for the cirrus streaks below,
+    // recovered rather than carried as a second uniform — see `ridgeField`'s
+    // note on why the far range now reads this at all.
+    let windAngle = atan2(uniforms.windDir.x, uniforms.windDir.y);
+    let shadow = ridgeShadow(hit.pos, hit.height, L, uniforms.ridgeAmp, windAngle);
 
     const INV_PI: f32 = 0.31830988618;
     let diff = wrapDiffuse(dot(N, L), mix(0.10, 0.30, sandMask));
@@ -157,7 +161,8 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // height meets the ground inside eighty metres, so there is nowhere it can
     // escape the terrain and show a base.
     if (uniforms.ridgeAmp > 1.0 && dir.y < 0.230 && dir.y > -0.050) {
-        let hit = ridgeMarch(uniforms.cameraPosition, dir, uniforms.ridgeAmp);
+        let windAngle = atan2(uniforms.windDir.x, uniforms.windDir.y);
+        let hit = ridgeMarch(uniforms.cameraPosition, dir, uniforms.ridgeAmp, windAngle);
         if (hit.hit) {
             col = shadeRidge(hit, dir);
         }
