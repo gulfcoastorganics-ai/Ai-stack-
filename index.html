@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>SNOWFLOW</title>
+<style>
+    :root {
+        /* Cool-shadow palette pulled from the Horizon reference. */
+        --ink:      #070b12;
+        --ink-2:    #0d141f;
+        --frost:    #dbe6f2;
+        --frost-dim:#7d8ea3;
+        --accent:   #8fc4e8;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--ink);
+        color: var(--frost);
+        font-family: ui-sans-serif, "Inter", "Segoe UI", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    #view {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        outline: none;
+        touch-action: none;
+    }
+
+    /* ---------------------------------------------------------------- boot */
+
+    #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: grid;
+        place-items: center;
+        background:
+            radial-gradient(120% 90% at 50% 42%, #16202e 0%, #0a1019 55%, #05080d 100%);
+        transition: opacity 900ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    #boot.gone { opacity: 0; pointer-events: none; }
+
+    /* Faint drifting grain so the boot screen is never a flat fill. */
+    #boot::after {
+        content: "";
+        position: absolute;
+        inset: -50%;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+        opacity: 0.035;
+        mix-blend-mode: screen;
+        animation: drift 24s linear infinite;
+        pointer-events: none;
+    }
+
+    @keyframes drift {
+        from { transform: translate3d(0, 0, 0); }
+        to   { transform: translate3d(-160px, -160px, 0); }
+    }
+
+    .boot-inner {
+        position: relative;
+        z-index: 1;
+        width: min(560px, 78vw);
+        text-align: center;
+    }
+
+    .wordmark {
+        font-size: clamp(28px, 4.4vw, 54px);
+        font-weight: 200;
+        letter-spacing: 0.62em;
+        text-indent: 0.62em; /* optical re-centre against the trailing track */
+        color: var(--frost);
+        opacity: 0;
+        animation: rise 1400ms cubic-bezier(0.16, 1, 0.3, 1) 120ms forwards;
+    }
+
+    .tagline {
+        margin-top: 1.4em;
+        font-size: 11px;
+        font-weight: 400;
+        letter-spacing: 0.34em;
+        text-indent: 0.34em;
+        text-transform: uppercase;
+        color: var(--frost-dim);
+        opacity: 0;
+        animation: rise 1400ms cubic-bezier(0.16, 1, 0.3, 1) 420ms forwards;
+    }
+
+    @keyframes rise {
+        from { opacity: 0; transform: translate3d(0, 14px, 0); }
+        to   { opacity: 1; transform: none; }
+    }
+
+    .bar {
+        position: relative;
+        margin: 3.6em auto 0;
+        width: 100%;
+        height: 1px;
+        background: rgba(219, 230, 242, 0.13);
+        overflow: hidden;
+    }
+
+    .bar-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 0%;
+        background: linear-gradient(90deg, transparent, var(--accent) 60%, #eaf4ff);
+        box-shadow: 0 0 14px rgba(143, 196, 232, 0.55);
+        transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .phase {
+        margin-top: 1.5em;
+        height: 1em;
+        font-size: 10px;
+        font-weight: 400;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--frost-dim);
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* --------------------------------------------------------- hard failure */
+
+    #nogpu {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        display: none;
+        place-items: center;
+        background: var(--ink);
+        padding: 2rem;
+        text-align: center;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        line-height: 1.7;
+        color: var(--frost-dim);
+    }
+
+    #nogpu.show { display: grid; }
+    #nogpu b { color: var(--frost); font-weight: 500; }
+
+    /* ------------------------------------------------------------- hint */
+
+    #hint {
+        position: fixed;
+        left: 50%;
+        bottom: 38px;
+        z-index: 50;
+        transform: translateX(-50%);
+        font-size: 10px;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: rgba(219, 230, 242, 0.42);
+        text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 700ms ease;
+    }
+
+    #hint.show { opacity: 1; }
+</style>
+</head>
+<body>
+    <canvas id="view" tabindex="0"></canvas>
+
+    <div id="hint">click to look &nbsp;·&nbsp; wasd to move &nbsp;·&nbsp; f1 for settings</div>
+
+    <div id="boot">
+        <div class="boot-inner">
+            <div class="wordmark">SNOWFLOW</div>
+            <div class="tagline">a study in snow</div>
+            <div class="bar"><div class="bar-fill" id="boot-bar"></div></div>
+            <div class="phase" id="boot-phase">initialising</div>
+        </div>
+    </div>
+
+    <div id="nogpu">
+        <div>
+            <b>WebGPU is not available in this browser.</b><br />
+            SNOWFLOW requires a WebGPU-capable browser. Try Chrome 113+ on a desktop GPU.
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
