@@ -116,7 +116,7 @@ export class Overlay {
         // --------------------------------------------------------- header
         const hdr = document.createElement("div");
         hdr.className = "hdr";
-        hdr.innerHTML = "<b>SNOWFLOW</b><i>F1 to close</i>";
+        hdr.innerHTML = "<b>SANDSTORM</b><i>F1 to close</i>";
         el.appendChild(hdr);
 
         // ----------------------------------------------------- frame graph

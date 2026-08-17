@@ -56,7 +56,7 @@ import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { Matrix, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { S } from "../core/settings.js";
+import { S, effectiveFogDensity } from "../core/settings.js";
 
 import postCommonLib from "../shaders/lib/postCommon.wgsl?raw";
 import taaFrag from "../shaders/post/taa.fragment.wgsl?raw";
@@ -163,7 +163,8 @@ export class PostChain {
         this.bloomC = this._pass("snowBloomBlur", 0.0625, ["srcTexel"], [],
             Constants.TEXTURETYPE_HALF_FLOAT);
         this.dof = this._pass("snowDof", 0.0625,
-            ["invRes", "enabled", "focusDist", "maxCoc"], ["sceneTex", "depthTex"],
+            ["invRes", "enabled", "focusDist", "maxCoc", "time", "heatStrength"],
+            ["sceneTex", "depthTex"],
             Constants.TEXTURETYPE_HALF_FLOAT);
         this.composite = this._pass("snowTonemap", 1.0,
             ["exposure", "contrast", "mode", "grainAmount", "time", "vignette",
@@ -266,7 +267,15 @@ export class PostChain {
             e.setFloat("sunOnScreen", this._sunOnScreen);
             e.setColor3("sunColor", this._sunColor);
             e.setFloat("enabled", S.showLightShafts ? 1 : 0);
-            e.setFloat("strength", S.shaftStrength);
+            // Suspended desert dust scatters the sun more than clean air, so
+            // shafts firm up somewhat as the same wind that raises
+            // `effectiveFogDensity()` for the aerial perspective picks up.
+            // `S.fogDensity` is the *calm* reference density; dividing the
+            // wind-adjusted one by it turns the same 0.65-per-gust curve used
+            // everywhere else into a plain multiplier here, so there is exactly
+            // one place that decides how strongly wind reacts.
+            const dustFactor = effectiveFogDensity() / Math.max(1e-6, S.fogDensity);
+            e.setFloat("strength", S.shaftStrength * dustFactor);
             e.setFloat(
                 "aspect", this.engine.getRenderWidth() / this.engine.getRenderHeight()
             );
@@ -316,6 +325,13 @@ export class PostChain {
             e.setFloat("maxCoc", this.engine.getRenderHeight() * 0.0024);
             e.setTexture("sceneTex", this.history[this._k]);
             e.setTexture("depthTex", depthTex);
+            // Heat shimmer rides in this same pass rather than a new one — see
+            // dof.fragment.wgsl. Independent of the `enabled`/DOF-blur toggle
+            // above: a true no-op at heatStrength 0, not gated behind DOF.
+            e.setFloat("time", this.time);
+            e.setFloat(
+                "heatStrength", S.heatShimmer ? S.heatShimmerStrength : 0
+            );
         };
 
         this.composite.onApply = (e) => {

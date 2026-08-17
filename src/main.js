@@ -1,5 +1,5 @@
 /**
- * SNOWFLOW — entry point and frame orchestration.
+ * SANDSTORM — entry point and frame orchestration.
  *
  * WebGPU only, by design. No WebGL path, no feature-detect branches: if the
  * adapter isn't there we say so once and stop.
@@ -285,7 +285,7 @@ async function boot() {
     await loading.done();
     setTimeout(() => overlay.resetSpikes(), 800);
 
-    globalThis.SNOWFLOW = {
+    globalThis.SANDSTORM = {
         engine, scene, rig, character, figure, contact, spray, wake, spells,
         overlay, terrain, sky, shadows, post, depthPass,
         S, input, perfStats: stats,

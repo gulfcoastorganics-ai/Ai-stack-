@@ -18,7 +18,7 @@ import { Constants } from "@babylonjs/core/Engines/constants";
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
-import { S } from "../core/settings.js";
+import { S, effectiveFogDensity } from "../core/settings.js";
 import { whenReady } from "../core/gpuUtil.js";
 
 const LUT_W = 512;
@@ -60,7 +60,7 @@ export class Sky {
         this.sunRadiance = new Color3(1, 1, 1);
         /** Shared radiometric scale for the sun and the baked sky. */
         this.sunScale = 1;
-        /** Radiance leaving the snow field, solved iteratively. */
+        /** Radiance leaving the sand field, solved iteratively. */
         this.groundBounce = new Color3(0, 0, 0);
         /** 36 floats: 9 SH coefficients as vec4, for the shader UBO. */
         this.sh = new Float32Array(36);
@@ -213,12 +213,13 @@ export class Sky {
     }
 
     /**
-     * Compile the bake shaders, then solve the sky and the snow bounce
+     * Compile the bake shaders, then solve the sky and the sand bounce
      * together. Used during load and after any sun change.
      *
-     * The two are mutually dependent: the sky lights the snow, the snow bounces
-     * ~85% of that straight back up, and that bounce is itself a major source
-     * of sky-hemisphere light. Solved by iteration — bake, project to SH, work
+     * The two are mutually dependent: the sky lights the sand, the sand bounces
+     * a good deal of that straight back up — less than SNOWFLOW's snow did, but
+     * still a real fraction — and that bounce is itself a source of
+     * sky-hemisphere light. Solved by iteration — bake, project to SH, work
      * out what the ground is now radiating, bake again. It converges in three
      * passes because each round trip is multiplied by the albedo.
      */
@@ -240,7 +241,7 @@ export class Sky {
         await this.projectSH();
     }
 
-    /** Radiance leaving the snow, from everything currently landing on it. */
+    /** Radiance leaving the sand, from everything currently landing on it. */
     _updateGroundBounce() {
         // Irradiance arriving on horizontal ground: direct sun (cosine-weighted)
         // plus the whole sky hemisphere, which the SH already integrates.
@@ -253,9 +254,9 @@ export class Sky {
         // Lambertian re-emission: L = albedo * E / PI.
         const k = 1 / Math.PI;
         this.groundBounce.set(
-            SNOW_ALBEDO[0] * er * k,
-            SNOW_ALBEDO[1] * eg * k,
-            SNOW_ALBEDO[2] * eb * k
+            SAND_ALBEDO[0] * er * k,
+            SAND_ALBEDO[1] * eg * k,
+            SAND_ALBEDO[2] * eb * k
         );
     }
 
@@ -356,7 +357,7 @@ export class Sky {
         m.setVector2("windDir", _wind);
         m.setFloat("cloudAmount", 0.55);
 
-        // The far range. Lit by the same radiance and the same SH the snow is —
+        // The far range. Lit by the same radiance and the same SH the sand is —
         // see `shadeRidge` in the fragment shader.
         m.setColor3("sunRadiance", this.sunRadiance);
         m.setArray4("shR", this.sh);
@@ -364,8 +365,10 @@ export class Sky {
         m.setFloat("ridgeAmp", S.showMountains ? S.mountainHeight : 0);
 
         // The field's own haze, so the range is hazed by the same atmosphere the
-        // dunes are and the two meet at one colour rather than two.
-        m.setFloat("fogDensity", S.fogDensity);
+        // dunes are and the two meet at one colour rather than two. Must read the
+        // identical `effectiveFogDensity()` the ground/wake/spray materials use —
+        // any divergence here is exactly the seam the comment above warns about.
+        m.setFloat("fogDensity", effectiveFogDensity());
         m.setFloat("fogHeightFalloff", S.fogHeightFalloff);
         m.setFloat("fogStart", S.fogStart);
         m.setFloat("aerialStrength", S.aerialStrength);
@@ -383,5 +386,20 @@ const _shBasis = new Float32Array(9);
 const _irrTmp = new Float32Array(3);
 const _wind = new Vector2(0, 1);
 
-/** Fresh snow reflects most of what hits it, slightly more at the blue end. */
-const SNOW_ALBEDO = [0.83, 0.86, 0.91];
+/**
+ * Ground-bounce albedo for the sky/IBL solve — SANDSTORM's replacement for
+ * SNOWFLOW's `SNOW_ALBEDO`, same role: the single number that turns "what the
+ * sky puts on the ground" into "what the ground bounces back into the sky",
+ * iterated to convergence in `solve()` below.
+ *
+ * Deliberately restrained rather than a saturated postcard-orange: this value
+ * feeds the SH ambient that lights *everything* — the ground, the character,
+ * the wake, the spells — not just the terrain material's own albedo (which is
+ * tuned separately and more richly in `snow.fragment.wgsl`). A strongly
+ * saturated bounce here would tint the whole scene uniformly amber regardless
+ * of what any individual surface actually is, which is the "everything turns
+ * orange" failure this value exists to avoid. Roughly 30% darker than
+ * SNOWFLOW's snow bounce and shifted onto the ochre axis, not further
+ * saturated than that.
+ */
+const SAND_ALBEDO = [0.58, 0.47, 0.33];

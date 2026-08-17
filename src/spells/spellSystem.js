@@ -205,7 +205,7 @@ export class SpellSystem {
      * Fire one spell, by key.
      *
      * Separated from the input poll so the console or a future rebind can cast
-     * without synthesising a key event. `SNOWFLOW.spells` is the console handle.
+     * without synthesising a key event. `SANDSTORM.spells` is the console handle.
      *
      * @param {number} key 1..5
      */

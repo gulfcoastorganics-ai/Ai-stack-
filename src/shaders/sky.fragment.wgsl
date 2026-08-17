@@ -16,7 +16,7 @@ uniform windDir: vec2f;
 uniform cloudAmount: f32;
 uniform cameraPosition: vec3f;
 /// Direct solar irradiance at the ground, on the same scale the LUT stores
-/// radiance in — so the range is lit by the identical number the snow is.
+/// radiance in — so the range is lit by the identical number the sand is.
 uniform sunRadiance: vec3f;
 uniform shR: array<vec4f, 9>;
 uniform ambientIntensity: f32;
@@ -24,7 +24,7 @@ uniform ambientIntensity: f32;
 uniform ridgeAmp: f32;
 
 // The field's own aerial perspective, so the range can be hazed by the same
-// atmosphere the snow in front of it is. See `shadeRidge`.
+// atmosphere the sand in front of it is. See `shadeRidge`.
 uniform fogDensity: f32;
 uniform fogHeightFalloff: f32;
 uniform fogStart: f32;
@@ -32,60 +32,65 @@ uniform aerialStrength: f32;
 
 /// Shade a point on the far range.
 ///
-/// Deliberately the *snow field's* material logic, not a separate one: the same
-/// wrapped diffuse, the same SH ambient, the same near-white albedo that is
-/// never 1.0. A distant mountain rendered with its own ad-hoc lighting is the
-/// classic way a matte painting announces itself — it does not sit in the same
-/// light as the ground in front of it.
+/// Deliberately the *ground material's* logic, not a separate one: the same
+/// wrapped diffuse, the same SH ambient, the same restrained albedo. A distant
+/// mountain rendered with its own ad-hoc lighting is the classic way a matte
+/// painting announces itself — it does not sit in the same light as the ground
+/// in front of it.
+///
+/// SANDSTORM: retinted from SNOWFLOW's snow-white massif to a sand-coloured
+/// desert range — warm ochre ridges, darker rocky silhouettes on the steepest
+/// faces, no snow-white value and no blue subsurface cue (the shared
+/// `snowSubsurface` this calls was itself retinted warm in the shared-shading
+/// pass, so nothing here has to special-case it). The lighting *structure* —
+/// diffuse, transmission, sky fill, self-bounce, aerial perspective — is
+/// exactly SNOWFLOW's; only the material constants changed.
 fn shadeRidge(hit: RidgeHit, dir: vec3f) -> vec3f {
     let N = hit.normal;
     let L = uniforms.sunDir;
 
-    // Snow almost everywhere, rock only on the faces too steep to hold it. This
-    // is a polar range, not an alpine one: there is no snow line to speak of, and
-    // the first version's 120-460 m ramp put rock across the whole visible band
-    // and turned the horizon into a dark smear. Rock is here for the *break* it
-    // gives a white massif, not as a ground cover.
+    // Sand almost everywhere, rock only on the faces too steep to hold it —
+    // the far-range equivalent of the ground material's own rock outcrops.
     let steep = 1.0 - N.y;
-    let snowMask = clamp(1.0 - smoothstep(0.46, 0.80, steep), 0.0, 1.0);
+    let sandMask = clamp(1.0 - smoothstep(0.46, 0.80, steep), 0.0, 1.0);
 
-    let rock = vec3f(0.052, 0.055, 0.066);
-    let snow = vec3f(0.855, 0.885, 0.945);
-    let albedo = mix(rock, snow, snowMask);
+    let rock = vec3f(0.16, 0.10, 0.07);
+    let sand = vec3f(0.62, 0.49, 0.33);
+    let albedo = mix(rock, sand, sandMask);
 
     let shadow = ridgeShadow(hit.pos, hit.height, L, uniforms.ridgeAmp);
 
     const INV_PI: f32 = 0.31830988618;
-    let diff = wrapDiffuse(dot(N, L), mix(0.15, 0.62, snowMask));
+    let diff = wrapDiffuse(dot(N, L), mix(0.10, 0.30, sandMask));
     var col = albedo * INV_PI * uniforms.sunRadiance * diff * shadow;
 
     // --- subsurface ---------------------------------------------------------
-    // The term the first version left out, and the reason the range read as a
-    // different material from the field it stands behind.
-    //
-    // Snow is translucent. The snow shader spends most of its budget saying so,
-    // and a mountain of snow with the sun behind it *glows* — it does not go to a
-    // dark silhouette. Without this the range came out as dark warm shapes
-    // against bright warm haze, which is the one combination that reads as dirt,
-    // and it was most visible in exactly the framing where a range should look
-    // its best: looking into a low sun.
+    // Kept, at a much reduced strength, for the same reason SNOWFLOW's snow
+    // massif needed it: without any transmission at all a mountain with the sun
+    // behind it goes to a dead silhouette, which against bright warm haze reads
+    // as dirt rather than as a sunlit range. Dry sand does not glow the way
+    // snow did, though, so this is a faint rim rather than the load-bearing
+    // effect it was on snow — `0.45` thickness / full-strength on snow is cut
+    // to `0.15` here, matching the same reduction the ground and wake
+    // materials made.
     //
     // Same `snowSubsurface` the ground runs, so the two cannot disagree about
-    // what back-lit snow does.
+    // what back-lit sand does — and since that shared function's tint was
+    // itself moved from blue to warm/golden, this carries no separate colour
+    // decision to keep in sync.
     let V = -dir;
-    col += snowSubsurface(N, L, V, uniforms.sunRadiance, 0.45, snowMask, 1.0)
+    col += snowSubsurface(N, L, V, uniforms.sunRadiance, 0.15, sandMask, 1.0)
          * albedo * mix(0.5, 1.0, shadow);
 
-    // Sky fill. At this distance it is most of what is left after extinction,
-    // and it is the reason distant snow reads blue rather than grey.
+    // Sky fill. At this distance it is most of what is left after extinction.
     col += albedo * INV_PI * shIrradiance(N, uniforms.shR) * uniforms.ambientIntensity;
 
-    // Bounce off the range's own snow, exactly as the field does off itself. A
-    // white massif is lit from every direction by the rest of the massif, and
+    // Bounce off the range's own sand, exactly as the field does off itself. A
+    // sand massif is lit from every direction by the rest of the massif, and
     // leaving it out is what makes shaded faces read as too dark by a stop.
     col += albedo * INV_PI * shIrradiance(vec3f(0.0, 1.0, 0.0), uniforms.shR)
          * uniforms.ambientIntensity * 0.30 * clamp(-N.y * 0.5 + 0.5, 0.0, 1.0)
-         * snowMask;
+         * sandMask;
 
     // ---- aerial perspective ------------------------------------------------
     //

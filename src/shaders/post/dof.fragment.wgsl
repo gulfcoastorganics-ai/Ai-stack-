@@ -17,6 +17,12 @@
 // Sample weighting is by the *sample's own* circle of confusion, so a blurred
 // background cannot bleed onto a sharp foreground — the artefact that makes cheap
 // depth of field look like a smeared decal around every silhouette.
+//
+// SANDSTORM addition: a restrained desert heat-shimmer offset, folded into this
+// pass rather than given a pass of its own — see `heatOffset` below. It shares
+// this shader's existing depth and full-resolution scene-colour bindings, so
+// the added cost is a handful of ALU ops per pixel and nothing else: no new
+// render target, no new bound texture, no new entry in the post chain.
 // -----------------------------------------------------------------------------
 
 #include<snowPostCommon>
@@ -36,6 +42,11 @@ uniform enabled: f32;
 uniform focusDist: f32;
 /// Largest circle of confusion, in pixels.
 uniform maxCoc: f32;
+uniform time: f32;
+/// 0 disables heat shimmer entirely (a true no-op — see `heatOffset`), scales
+/// linearly above that. Independent of `enabled`: DOF's blur and the shimmer
+/// are two different effects that happen to share this pass.
+uniform heatStrength: f32;
 
 const TAPS: i32 = 16;
 const GOLDEN: f32 = 2.39996323;
@@ -96,19 +107,62 @@ fn gather(uv: vec2f, pix: vec2f, r: f32, centre: vec3f) -> vec3f {
     return acc / wsum;
 }
 
+/// Restrained desert heat-shimmer sampling offset.
+///
+/// Gated purely on distance — `z` is the linear view depth this pass already
+/// has bound, so no new texture or uniform is needed to know "how far away is
+/// this pixel". It fades in well past the DOF far ramp (140-700 m here against
+/// DOF's own 130-620 m) so the two effects agree on what counts as "distant"
+/// without literally sharing a constant, and it goes to exactly zero below
+/// that band, over the sky (`isBackground`), and whenever `heatStrength` is 0
+/// — the last of which is the toggle's true no-op path.
+///
+/// This pass has depth but not shading, so it cannot know which distant
+/// pixels are in shadow the way the ground material can; the item asking for
+/// this effect accepts that this pass lacks that information, so the offset
+/// here is not shadow-gated. Kept weak enough in practice (a few tenths of a
+/// pixel at `heatShimmerStrength`'s default) that the omission should not
+/// read as wrong — the ground material's own shading still darkens shadowed
+/// terrain normally, the shimmer just does not additionally back off there.
+///
+/// Only the vertical component wobbles — real heat haze rises and wavers, it
+/// does not swim sideways — so this never reads as the frame sliding around
+/// under camera motion, only as air shimmering in place.
+fn heatOffset(z: f32, uv: vec2f, t: f32) -> vec2f {
+    if (uniforms.heatStrength <= 0.0 || isBackground(z)) { return vec2f(0.0); }
+
+    let far01 = smoothstep(140.0, 700.0, z);
+    if (far01 <= 0.0) { return vec2f(0.0); }
+
+    // Two incommensurate frequencies so the wobble does not read as a single
+    // repeating wave — the same reasoning the wake's erosion noise uses.
+    let wob = sin(uv.x * 38.0 + t * 0.9) * 0.6
+            + sin(uv.y * 61.0 - t * 1.35 + uv.x * 11.0) * 0.4;
+
+    // In UV space: 0.0016 is a little over two pixels at 1440p and full
+    // strength, at the far edge of the ramp only — restrained by construction,
+    // not just by the default slider value.
+    return vec2f(0.0, wob * far01 * uniforms.heatStrength * 0.0016);
+}
+
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
     let uv = input.vUV;
-    let centre = textureSampleLevel(sceneTex, sceneTexSampler, uv, 0.0);
+    // True depth at the true pixel — used for both the shimmer gate and the
+    // circle-of-confusion below, so the two effects never disagree about how
+    // far away this pixel actually is.
+    let z = textureSampleLevel(depthTex, depthTexSampler, uv, 0.0).r;
+
+    let hUV = uv + heatOffset(z, uv, uniforms.time);
+    let centre = textureSampleLevel(sceneTex, sceneTexSampler, hUV, 0.0);
 
     var outCol = centre.rgb;
     if (uniforms.enabled > 0.5) {
-        let z = textureSampleLevel(depthTex, depthTexSampler, uv, 0.0).r;
         let r = abs(cocOf(z, uniforms.focusDist)) * uniforms.maxCoc;
         // Under a pixel and a half there is nothing a gather can do that the
         // display transform will not throw away, and this is the branch almost
         // the whole frame takes.
-        if (r >= 1.5) { outCol = gather(uv, input.position.xy, r, centre.rgb); }
+        if (r >= 1.5) { outCol = gather(hUV, input.position.xy, r, centre.rgb); }
     }
 
     fragmentOutputs.color = vec4f(outCol, centre.a);

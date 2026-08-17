@@ -43,7 +43,7 @@ import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Constants } from "@babylonjs/core/Engines/constants";
 import { Vector3, Vector4 } from "@babylonjs/core/Maths/math";
 
-import { S } from "../core/settings.js";
+import { S, effectiveFogDensity } from "../core/settings.js";
 import { whenReady, bindMatrixArray } from "../core/gpuUtil.js";
 import { CASCADE_COUNT } from "../render/shadows.js";
 import { SPELL_LIGHT_UNIFORMS } from "../spells/spellLights.js";
@@ -162,7 +162,7 @@ export class SurfWake {
 
         /**
          * Per-term diagnostic, settable from the console as
-         * `SNOWFLOW.wake.debug = n`. See the switch at the bottom of
+         * `SANDSTORM.wake.debug = n`. See the switch at the bottom of
          * `wake.fragment.wgsl` for the modes.
          */
         this.debug = 0;
@@ -647,7 +647,7 @@ export class SurfWake {
         m.setFloat("shadowSoftness", 1.5);
         m.setFloat("shadowBias", 0.018);
 
-        m.setFloat("fogDensity", S.fogDensity);
+        m.setFloat("fogDensity", effectiveFogDensity());
         m.setFloat("fogHeightFalloff", S.fogHeightFalloff);
         m.setFloat("fogStart", S.fogStart);
         m.setFloat("aerialStrength", S.aerialStrength);

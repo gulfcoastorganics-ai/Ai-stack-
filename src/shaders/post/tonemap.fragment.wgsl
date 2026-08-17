@@ -8,16 +8,18 @@
 // shoulder rather than clipping after it; grain goes on after the encode so it
 // reads evenly across the range instead of vanishing in the shadows.
 //
-// Snow renders die at the tonemapper. The scene is a huge, bright, low-contrast
-// surface, so any curve that saturates early turns the whole field into a flat
-// white sheet with no form — the single most common failure in snow rendering.
+// Bright, low-contrast outdoor renders die at the tonemapper — SNOWFLOW's snow
+// field and SANDSTORM's sunlit dune faces fail the same way: any curve that
+// saturates early turns a huge, bright surface into a flat sheet with no form,
+// the single most common failure in this kind of outdoor rendering.
 //
 // AgX is the default here rather than ACES for exactly that reason: it desaturates
 // toward white as it approaches the shoulder instead of hue-shifting, and its
-// shoulder is long enough that a sunlit drift at 6x middle grey still has legible
-// gradation instead of clipping to 1.0. ACES is offered for comparison and does
-// visibly worse on this content — it pushes bright snow toward a warm cast and
-// crushes the last stop.
+// shoulder is long enough that a sunlit dune crest at several times middle grey
+// still has legible gradation instead of clipping to 1.0. ACES is offered for
+// comparison and does visibly worse on this content — it pushes bright terrain
+// toward a warm cast and crushes the last stop, which on an already-warm desert
+// palette reads as orange-channel clipping rather than as loss of detail.
 // -----------------------------------------------------------------------------
 
 varying vUV: vec2f;
@@ -118,7 +120,7 @@ fn linearToSrgb(c: vec3f) -> vec3f {
 //   radial smear    six taps drawn toward the focus. This is the one that does
 //                   the work — it is the only thing in the chain that makes the
 //                   *scene* look fast rather than decorating it.
-//   spindrift       sparse radial strands of blown snow tearing past the lens,
+//   spindrift       sparse radial strands of blown sand tearing past the lens,
 //                   phase-advanced with time so they stream outward.
 //
 // Both are applied before the tonemapper so its shoulder rolls the strands off
@@ -131,12 +133,12 @@ fn streakStrands(d: vec2f, r: f32, t: f32) -> f32 {
     let cell = floor(a);
     let rnd = fract(sin(cell * 12.9898 + 4.1) * 43758.5453);
     // Only a fraction of the angular cells carry a strand; a strand in every one
-    // reads as a zoom-blur artefact rather than as blowing snow.
+    // reads as a zoom-blur artefact rather than as blowing sand.
     if (rnd > 0.34) { return 0.0; }
 
     let across = abs(fract(a) - 0.5) * 2.0;
     // The radial frequency is the number that decides whether this reads as
-    // blowing snow or as scratches on the lens. At one cycle across the frame a
+    // blowing sand or as scratches on the lens. At one cycle across the frame a
     // strand is a straight line from the centre to the corner; at fourteen it is
     // a two-centimetre dash, which is what a grain of spindrift crossing the
     // frame in a fifteenth of a second actually looks like.
@@ -182,16 +184,19 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     if (uniforms.bloomAmount > 0.0001) {
         let near = textureSampleLevel(bloomNear, bloomNearSampler, input.vUV, 0.0).rgb;
         let far = textureSampleLevel(bloomFar, bloomFarSampler, input.vUV, 0.0).rgb;
-        // Weighted toward the wide level: a tight halo on a snow field reads as a
+        // Weighted toward the wide level: a tight halo on a sand field reads as a
         // rendering artefact, a broad one reads as glare in the air.
         c += (near * 0.35 + far * 0.65) * uniforms.bloomAmount;
     }
 
-    // Blown snow, added in exposed linear so its brightness is stated relative
+    // Blown sand, added in exposed linear so its brightness is stated relative
     // to middle grey rather than to whatever the scene happens to be sitting at.
+    // SANDSTORM: retinted off SNOWFLOW's cool near-white onto warm ochre — the
+    // same "no white/blue particles anywhere" rule the pooled spray system's
+    // own material follows.
     if (streak > 0.002) {
         let s = streakStrands(dFocus, radius, uniforms.time);
-        c += vec3f(0.88, 0.94, 1.06) * s * streak * 0.16;
+        c += vec3f(0.95, 0.78, 0.52) * s * streak * 0.16;
     }
 
     // Contrast about middle grey, applied in linear before the curve so it
@@ -207,7 +212,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // needs its EOTF (the 2.2 power) applied before the shared sRGB encode
         // at the bottom. Skipping that double-encodes the image: everything
         // lifts toward mid grey and the whole frame goes flat and milky —
-        // which on snow is indistinguishable from "the shader is wrong".
+        // which on sand is indistinguishable from "the shader is wrong".
         var v = agx(c);
         v = agxLook(v, 1.14);
         mapped = pow(max(AGX_OUT * v, vec3f(0.0)), vec3f(2.2));

@@ -1,11 +1,21 @@
 // -----------------------------------------------------------------------------
 // snowAtmosphere — sky model and aerial perspective.
 //
+// SANDSTORM: this is SNOWFLOW's Nishita atmosphere, unchanged as physics — it
+// is a real-air scattering model, not a snow-specific one, so nothing about
+// converting the ground to sand touches the integral itself. The two things
+// that did move are (1) the ground-bounce colour fed in from below (now sand,
+// solved in `sky.js`'s `SAND_ALBEDO`) and (2) the horizon's grazing-angle pale
+// colour, retuned warm for a dusty desert sky rather than a clean polar one —
+// see the note at `nishitaSky`'s tail. Target sun elevation for the desert
+// look is roughly 8-14 degrees, the low end of the same 5-15 degree range this
+// was always tuned for.
+//
 // The sky is a Nishita single-scattering integration rather than an HDRI. The
-// whole look hangs on a sun sitting 5-15 degrees above the horizon, and with an
-// analytic model the sun angle is a slider that correctly drags the sky
-// gradient, the horizon warmth and the ambient tint along with it. A captured
-// HDRI locks all of that to whatever elevation the photographer had.
+// whole look hangs on a low sun, and with an analytic model the sun angle is a
+// slider that correctly drags the sky gradient, the horizon warmth and the
+// ambient tint along with it. A captured HDRI locks all of that to whatever
+// elevation the photographer had.
 //
 // It is expensive — 16 view steps by 8 light steps — so it is never evaluated
 // per pixel per frame. It bakes into a cubemap at load, and again only when the
@@ -13,7 +23,7 @@
 //
 // Aerial perspective at runtime is the cheap analytic half: height-falloff
 // extinction plus an inscatter colour looked up from that same cubemap, which
-// keeps distant snow tied to the sky it is sitting under.
+// keeps the distant desert tied to the sky it is sitting under.
 // -----------------------------------------------------------------------------
 
 const EARTH_R: f32 = 6360000.0;
@@ -247,12 +257,19 @@ fn nishitaSky(rayDir: vec3f, sunDir: vec3f, sunIntensity: f32, groundBounce: vec
     // cool dome above it. The residual warmth it left was invisible while it was
     // a thin strip mostly hidden behind terrain; with the far field dissolving
     // *into* it, it became a tan wash across a quarter of the frame, on the side
-    // of the sky facing away from the sun. Pale, very slightly cool — which is
-    // what a real hazy horizon is when you are not looking at the sun, and the
-    // warm case is added back afterwards by the forward lobe.
+    // of the sky facing away from the sun.
+    //
+    // SANDSTORM: SNOWFLOW pulled this toward a pale, very slightly *cool* white
+    // — physically apt for a clean polar sky away from the sun, where the warm
+    // case was left to the forward lobe alone. A desert horizon under real dust
+    // loading does not do that: suspended sand keeps the whole band warm even
+    // facing away from the sun, so the pale target here moved from a faint blue
+    // tint to a faint ochre one. Still desaturated — this is what a thick,
+    // hazy, high-order-scattered path looks like, not a second sunset — just
+    // warm instead of cool.
     let grazing = 1.0 - smoothstep(0.0, 0.26, abs(rayDir.y));
     let pale = dot(col, vec3f(0.30, 0.42, 0.28));
-    col = mix(col, vec3f(pale) * vec3f(0.97, 1.0, 1.06), grazing * 0.82);
+    col = mix(col, vec3f(pale) * vec3f(1.06, 1.0, 0.90), grazing * 0.82);
 
     return col;
 }

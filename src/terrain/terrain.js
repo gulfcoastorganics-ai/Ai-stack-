@@ -21,7 +21,7 @@ import {
     GRID_HALF_N,
     OUTER_EXTENT,
 } from "./clipmapMesh.js";
-import { S } from "../core/settings.js";
+import { S, effectiveFogDensity } from "../core/settings.js";
 import { CASCADE_COUNT } from "../render/shadows.js";
 import { SPELL_LIGHT_UNIFORMS } from "../spells/spellLights.js";
 import { bakeOnce, whenReady, bindMatrixArray } from "../core/gpuUtil.js";
@@ -320,7 +320,7 @@ export class Terrain {
         m.setFloat("sssStrength", S.sssStrength);
         m.setFloat("sssRadius", S.sssRadius);
 
-        m.setFloat("fogDensity", S.fogDensity);
+        m.setFloat("fogDensity", effectiveFogDensity());
         m.setFloat("fogHeightFalloff", S.fogHeightFalloff);
         m.setFloat("fogStart", S.fogStart);
         m.setFloat("aerialStrength", S.aerialStrength);

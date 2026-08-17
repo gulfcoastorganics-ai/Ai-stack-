@@ -93,15 +93,29 @@ export const S = {
     grain: true,
     sharpen: true,
     tonemap: "agx", // "agx" | "aces" | "none"
-    // Measured, not guessed: sunlit snow here sits around 12 in linear, and at
-    // this exposure it lands near AgX normalised 0.79, where the curve's slope
-    // is 0.09 per stop. Higher exposures push it into the shoulder, where the
-    // slope collapses and every lit slope resolves to the same flat white.
-    exposure: 0.105,
+    // SNOWFLOW measured sunlit snow at ~12 in linear, landing near AgX
+    // normalised 0.79 — close enough to the shoulder for rich highlight
+    // gradation without actually clipping. Sand's albedo is markedly lower
+    // than snow's (see `SAND_ALBEDO` in sky.js and the ground material's own
+    // constants), so the same exposure now sits comfortably further from the
+    // shoulder: less risk of premature highlight clipping, less bloom bleed
+    // off broad sunlit terrain (bloom's own knee is unchanged, in the same
+    // exposed units), at the cost of the scene reading a little moodier
+    // overall — which fits a late-golden-hour desert better than it would
+    // have fit snow. Nudged up slightly rather than left exactly as-is, so
+    // the frame is not simply dim: partial compensation, not full parity with
+    // SNOWFLOW's brightness target.
+    exposure: 0.118,
     contrast: 1.14,
     bloomStrength: 0.22,
     grainStrength: 0.022,
     sharpenStrength: 0.55,
+    // Restrained depth-aware desert heat distortion over distant sunlit
+    // terrain. Implemented inside the existing DOF pass (see dof.fragment.wgsl)
+    // rather than as a new render target or pass, so it is a few extra ALU ops
+    // on an already-bound depth/colour pair, not a new cost category.
+    heatShimmer: true,
+    heatShimmerStrength: 0.35,
 
     // --------------------------------------------------------------- systems
     showTerrain: true,
@@ -128,13 +142,13 @@ export const SCHEMA = [
             { k: "sunIntensity", l: "Intensity", t: "f", min: 0, max: 10, step: 0.05 },
             { k: "sunTempWarm", l: "Warmth", t: "f", min: 0, max: 1, step: 0.01 },
             { k: "ambientIntensity", l: "Ambient", t: "f", min: 0, max: 3, step: 0.01 },
-            { k: "ambientBlue", l: "Ambient blue", t: "f", min: 0, max: 2, step: 0.01 },
+            { k: "ambientBlue", l: "Ambient tint", t: "f", min: 0, max: 2, step: 0.01 },
         ],
     },
     {
         group: "Atmosphere",
         items: [
-            { k: "fogDensity", l: "Fog density", t: "f", min: 0, max: 0.03, step: 0.0001 },
+            { k: "fogDensity", l: "Dust density", t: "f", min: 0, max: 0.03, step: 0.0001 },
             { k: "fogHeightFalloff", l: "Height falloff", t: "f", min: 0, max: 0.3, step: 0.001 },
             { k: "aerialStrength", l: "Aerial persp.", t: "f", min: 0, max: 2, step: 0.01 },
             { k: "windDirection", l: "Wind dir", t: "f", min: 0, max: 360, step: 1 },
@@ -166,7 +180,7 @@ export const SCHEMA = [
         ],
     },
     {
-        group: "Snow-surf",
+        group: "Dune-surf",
         items: [
             { k: "wakeHeight", l: "Wake height", t: "f", min: 0, max: 2, step: 0.01 },
             { k: "wakeSpray", l: "Plume density", t: "f", min: 0, max: 2.5, step: 0.01 },
@@ -188,8 +202,10 @@ export const SCHEMA = [
         group: "Post",
         items: [
             { k: "taa", l: "TAA", t: "b" },
-            { k: "ssr", l: "SSR (ice)", t: "b" },
+            { k: "ssr", l: "SSR (crust)", t: "b" },
             { k: "dof", l: "Depth of field", t: "b" },
+            { k: "heatShimmer", l: "Heat shimmer", t: "b" },
+            { k: "heatShimmerStrength", l: "Shimmer amt", t: "f", min: 0, max: 2, step: 0.01 },
             { k: "bloom", l: "Bloom", t: "b" },
             { k: "grain", l: "Film grain", t: "b" },
             { k: "sharpen", l: "Sharpen", t: "b" },
@@ -270,4 +286,27 @@ export function applyPreset(name) {
     if (!p) return;
     S.preset = name;
     for (const k in p) set(k, p[k]);
+}
+
+/**
+ * Effective aerial-perspective density, including wind-driven desert dust.
+ *
+ * SANDSTORM addition: every material that sets `fogDensity` as a uniform
+ * (the ground, the wake, the spray, the sky/far-range) now reads this instead
+ * of `S.fogDensity` directly, so "the same wind reacts modestly everywhere"
+ * lives in one place rather than four. Pure function of two numbers already
+ * read every frame — no allocation, no new render pass, no readback.
+ *
+ * The `fogHeightFalloff` term already does "falls off with altitude" and
+ * `fogStart`/the aerial-perspective distance ramp already do "near terrain,
+ * toward the horizon" for any density value, so wind only needs to scale the
+ * one number those mechanisms are built on. Below the calm threshold this is
+ * an exact no-op — `S.fogDensity` — which matters because it means "no wind"
+ * reproduces SNOWFLOW's baseline aerial perspective exactly rather than a
+ * slightly-different resting state.
+ */
+export function effectiveFogDensity() {
+    const calm = 0.3;
+    const gust = Math.max(0, S.windStrength - calm);
+    return S.fogDensity * (1 + 0.65 * gust);
 }
