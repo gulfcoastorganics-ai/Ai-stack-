@@ -10,6 +10,7 @@
 
 import { S, SCHEMA, set, applyPreset } from "../core/settings.js";
 import { stats, systemMs, FrameGraph, spikes, resetSpikes } from "../core/perf.js";
+import { input } from "../core/input.js";
 
 const CSS = `
 #ov {
@@ -204,6 +205,14 @@ export class Overlay {
         this._mkNum(loco, "locoSurf", "surf");
         this._mkNum(loco, "locoAction", "dash cd / air dash");
         this._mkNum(loco, "locoJump", "sand step");
+        // Phase 8B repair: a permanent, low-noise readout of the raw jump
+        // input state — proves "did the keydown actually reach input.js"
+        // separately from "did the controller act on it", which is exactly
+        // the seam the reported jump regression turned out to live on (see
+        // input.js's note on the root cause). Cheaper than console logging
+        // and it stays useful for the next input bug instead of needing to
+        // be re-added and re-removed each time.
+        this._mkNum(loco, "locoJumpInput", "space: presses/held/locked");
 
         // -------------------------------------------------------- presets
         const ph = document.createElement("h2");
@@ -458,6 +467,7 @@ export class Overlay {
             this._txt(r.locoSurf, "—");
             this._txt(r.locoAction, "—");
             this._txt(r.locoJump, "—");
+            this._txt(r.locoJumpInput, "—");
             return;
         }
 
@@ -480,6 +490,12 @@ export class Overlay {
         this._txt(
             r.locoJump,
             c.grounded ? "grounded" : c.jumpCount <= 1 ? "ready" : "used"
+        );
+        this._txt(
+            r.locoJumpInput,
+            input.jumpPressCount + " / " +
+            (input.jumpHeld ? "yes" : "no") + " / " +
+            (input.locked ? "yes" : "no")
         );
     }
 

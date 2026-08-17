@@ -71,16 +71,16 @@ export class CameraRig {
         this.yaw = 2.4;
         this.pitch = 0.17;
 
-        // Phase 8B: pulled in from 6.2 — with the environment now carrying
-        // real dune microstructure and the character carrying real geometric
-        // detail, the traveler no longer needs to sit small in frame to sell
-        // scale. ~4.8 puts them roughly 25-30% larger on screen at the
-        // default zoom during ordinary running. Surf/dash framing is
-        // untouched: `_extraDist` below still adds the same amount on top of
-        // whatever this base is, so the camera still pulls out by the same
-        // increment at speed — it is just pulling out from a closer start.
-        this.distance = 4.8;
-        this.distanceTarget = 4.8;
+        // Pulled in from SNOWFLOW's original 6.2, then again from Phase 8B's
+        // 4.8: the character carries substantially more geometric detail
+        // now (see `build.js`) and none of it reads at a distance built for
+        // a much simpler silhouette. World scale is untouched — this only
+        // moves the camera, not the terrain or the character's own size.
+        // Surf/dash framing is unaffected: `_extraDist` below still adds the
+        // same amount on top of whatever this base is, so the camera still
+        // pulls out by the same increment at speed, just from a closer start.
+        this.distance = 4.3;
+        this.distanceTarget = 4.3;
 
         /** Smoothed pivot position (the thing the spring chases). */
         this.pivot = new Vector3(0, 0, 0);

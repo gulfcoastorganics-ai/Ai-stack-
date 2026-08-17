@@ -270,22 +270,6 @@ function ring(cx, cy, cz, rx, rz, ao, bones) {
     return [cx, cy, cz, rx, rz, ao, bones[0], bones[1], bones[2], bones[3]];
 }
 
-/** Rings along a straight bone segment, interpolating radius and bone weights. */
-function limbRings(x0, y0, z0, x1, y1, z1, r0, r1, steps, boneA, boneB, ao, from, to) {
-    const out = [];
-    for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        // Weight ramps from boneA to boneB across the segment's lower half, so
-        // the joint bends smoothly instead of creasing at one ring.
-        const w = Math.min(1, Math.max(0, (t - from) / (to - from)));
-        const r = r0 + (r1 - r0) * t;
-        out.push(ring(
-            x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, z0 + (z1 - z0) * t,
-            r, r, ao, [boneA, 1 - w, boneB, w]
-        ));
-    }
-    return out;
-}
 
 // -----------------------------------------------------------------------------
 //  Body
@@ -303,10 +287,13 @@ export function buildBody(scene) {
 
     // ---- torso ------------------------------------------------------------
     const torso = [];
+    // Waist narrowed and the chest/shoulder line widened a touch further —
+    // "shoulders wider than waist" needs to be unambiguous even through a
+    // coat, since the coat's own drape takes its cue from the body under it.
     const TORSO = [
-        [0.88, 0.150, 0.120], [0.98, 0.142, 0.113], [1.06, 0.134, 0.106],
-        [1.14, 0.140, 0.109], [1.22, 0.156, 0.118], [1.30, 0.172, 0.126],
-        [1.38, 0.176, 0.126], [1.44, 0.160, 0.116],
+        [0.88, 0.148, 0.118], [0.98, 0.136, 0.107], [1.06, 0.124, 0.098],
+        [1.14, 0.136, 0.106], [1.22, 0.158, 0.119], [1.30, 0.178, 0.129],
+        [1.38, 0.184, 0.130], [1.44, 0.164, 0.118],
     ];
     for (let i = 0; i < TORSO.length; i++) {
         const [y, rx, rz] = TORSO[i];
@@ -409,9 +396,12 @@ export function buildBody(scene) {
         const a = (i / 8) * Math.PI;
         const y = HEAD_C[1] - Math.cos(a) * 0.105;
         const r = Math.sin(a);
+        // Radii trimmed slightly (0.089/0.096 -> 0.082/0.088): paired with
+        // the tighter hood above, so the head+hood silhouette reads as a
+        // head with a garment over it rather than one large rounded mass.
         head.push(ring(
             0, y, HEAD_C[2] + r * 0.006,
-            0.089 * r + 0.004, 0.096 * r + 0.004,
+            0.082 * r + 0.004, 0.088 * r + 0.004,
             0.22, [B_HEAD, 1, 0, 0]
         ));
     }
@@ -435,16 +425,36 @@ export function buildBody(scene) {
         const fo = a === 0 ? B_FORE_L : B_FORE_R;
         const hd = a === 0 ? B_HAND_L : B_HAND_R;
 
-        const upper = limbRings(
-            s * 0.185, 1.400, 0, s * 0.230, 1.123, 0,
-            0.064, 0.050, 4, up, fo, 0.55, 0.72, 1.0
-        );
+        // Phase 8B repair: `limbRings` only interpolates radius linearly
+        // between its two endpoints, which is exactly what reads as a
+        // tapered tube rather than a limb — real deltoids bulge below the
+        // shoulder joint and real forearms are thickest just past the
+        // elbow, not at either end. Built explicitly instead, the same way
+        // the hand/boot lists already are, so the radius profile can be
+        // genuinely non-monotonic.
+        const upperT = [0, 0.15, 0.4, 0.7, 1.0];
+        const upperR = [0.058, 0.070, 0.058, 0.050, 0.044];
+        const upper = [];
+        for (let i = 0; i < upperT.length; i++) {
+            const t = upperT[i];
+            const x = s * (0.185 + 0.045 * t);
+            const y = 1.400 + (1.123 - 1.400) * t;
+            const w = Math.min(1, Math.max(0, (t - 0.72) / 0.28));
+            upper.push(ring(x, y, 0, upperR[i], upperR[i], 0.55, [up, 1 - w, fo, w]));
+        }
         loft(B, upper, M_ROBE, [0, 0, 1], true, false);
 
-        const fore = limbRings(
-            s * 0.230, 1.123, 0, s * 0.243, 0.866, 0.016,
-            0.050, 0.042, 4, fo, hd, 0.62, 0.75, 1.0
-        );
+        const foreT = [0, 0.2, 0.5, 0.8, 1.0];
+        const foreR = [0.048, 0.053, 0.044, 0.038, 0.034];
+        const fore = [];
+        for (let i = 0; i < foreT.length; i++) {
+            const t = foreT[i];
+            const x = s * (0.230 + (0.243 - 0.230) * t);
+            const y = 1.123 + (0.866 - 1.123) * t;
+            const z = 0.016 * t;
+            const w = Math.min(1, Math.max(0, (t - 0.75) / 0.25));
+            fore.push(ring(x, y, z, foreR[i], foreR[i], 0.62, [fo, 1 - w, hd, w]));
+        }
         loft(B, fore, M_ROBE, [0, 0, 1], false, false);
 
         // Phase 8B: the hand no longer needs individually simulated fingers,
@@ -489,10 +499,19 @@ export function buildBody(scene) {
         const sh = l === 0 ? B_SHIN_L : B_SHIN_R;
         const ft = l === 0 ? B_FOOT_L : B_FOOT_R;
 
-        const thigh = limbRings(
-            s * 0.100, 0.905, 0, s * 0.100, 0.460, 0,
-            0.114, 0.086, 5, th, sh, 0.5, 0.74, 1.0
-        );
+        // Non-monotonic, like the arms above: real thigh mass peaks below
+        // the hip, not at it, and a defined "knee break" — narrower right
+        // at the joint than either the thigh above or the calf below — is
+        // most of what separates a leg from a tapered pole.
+        const thighT = [0, 0.25, 0.55, 0.85, 1.0];
+        const thighR = [0.108, 0.120, 0.102, 0.090, 0.084];
+        const thigh = [];
+        for (let i = 0; i < thighT.length; i++) {
+            const t = thighT[i];
+            const y = 0.905 + (0.460 - 0.905) * t;
+            const w = Math.min(1, Math.max(0, (t - 0.74) / 0.26));
+            thigh.push(ring(s * 0.100, y, 0, thighR[i], thighR[i], 0.5, [th, 1 - w, sh, w]));
+        }
         loft(B, thigh, M_ROBE, [0, 0, 1], true, false);
 
         // Trousers narrow to the ankle then flare into the boot shaft.
@@ -607,7 +626,17 @@ function buildHood(B) {
             nx /= nl; ny /= nl; nz /= nl;
             // Radius out from the head: widest over the crown, tightest at the
             // throat, which is what gives the cowl its peak.
-            const rad = 0.205 + 0.062 * ca;
+            //
+            // Pulled in modestly from 0.205/0.062 — at the old radius the
+            // hood's control point sat far enough clear of the skull that
+            // the whole hood read as one oversized rounded mass. Kept
+            // conservative (not cut further) because this same radius feeds
+            // the Bezier control point between the rim and base curves
+            // below (each with their own, larger, fixed radii) — pull it in
+            // too far and the control point falls inside the chord between
+            // them instead of bowing outward past it, which would pinch the
+            // hood rather than shrink it.
+            const rad = 0.185 + 0.055 * ca;
             const mx = HEAD_C[0] + nx * rad;
             const my = HEAD_C[1] + ny * rad;
             const mz = HEAD_C[2] + nz * rad;

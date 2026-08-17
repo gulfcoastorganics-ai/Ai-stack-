@@ -254,6 +254,8 @@ export class Figure {
          * kick in this file follows.
          */
         this._launchKick = 0;
+        /** Seconds since the last primary jump fired; large when idle. */
+        this._launchT = 999;
 
         this._t = 0;
         this._prevGait = 0;

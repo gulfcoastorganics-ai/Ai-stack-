@@ -55,6 +55,17 @@ export const input = {
     camResetPressed: false,
 
     locked: false,
+
+    /**
+     * Monotonic count of non-repeat Space keydowns since load. `jumpPressed`
+     * itself is cleared every frame by `endFrame()`, so a UI sampled slower
+     * than 60Hz (the overlay's locomotion panel, for instance) would almost
+     * never catch it true even when every press is registering correctly.
+     * This counter exists so "did the event actually arrive" stays provable
+     * without racing the polling window — see the overlay's jump-input
+     * diagnostic row.
+     */
+    jumpPressCount: 0,
 };
 
 const keys = Object.create(null);
@@ -95,6 +106,7 @@ export function initInput(canvas, hooks) {
             input.surf = false;
             input.spellHeld2 = false;
             input.jumpHeld = false;
+            input.jumpPressed = false;
         }
     });
 
@@ -138,6 +150,24 @@ export function initInput(canvas, hooks) {
             return;
         }
 
+        // Phase 8B repair: jump — and, below, dash/evade/camera-recenter —
+        // used to require `input.locked` (pointer lock actually engaged)
+        // before they would register at all, while `pollInput()`'s WASD
+        // movement never checked lock state. Anywhere pointer lock silently
+        // fails to acquire — a sandboxed/automated browser, a permissions
+        // policy denying it, or simply a player who moves before ever
+        // clicking the canvas — that asymmetry meant movement worked and
+        // every keyboard *action* did not, which reads exactly like "jump is
+        // broken" even though the controller/`_tryJump` logic downstream was
+        // never the problem. Root cause found by tracing the full path
+        // (keydown -> input.jumpPressed -> controller -> `_tryJump`) rather
+        // than assumed: `_tryJump` was always correct, the event never
+        // reached `input.jumpPressed` in the first place. Keyboard actions
+        // now behave like WASD always does — no lock requirement. RMB-surf
+        // (below, in the `mousedown` handler) keeps its lock requirement:
+        // pointer lock is specifically what frees the right mouse button
+        // from the browser's own context menu, so that one gate is load-
+        // bearing rather than incidental.
         const isJumpKey = e.code === "Space";
         // Space is the discrete action button (jump / Sand Step), not a held
         // movement modifier — `jumpPressed` fires once per physical press
@@ -147,11 +177,14 @@ export function initInput(canvas, hooks) {
         // "is it down", but the controller's own jump logic deliberately
         // does not read it — see the field's own doc comment on why a naive
         // `if (spaceHeld) jump()` would fire every frame. Shift is not bound
-        // to jump at all — Phase 8B reverted the earlier control revision.
+        // to jump at all.
         if (isJumpKey) {
-            if (!e.repeat && input.locked) input.jumpPressed = true;
+            if (!e.repeat) {
+                input.jumpPressed = true;
+                input.jumpPressCount++;
+            }
             input.jumpHeld = true;
-            if (input.locked) e.preventDefault(); // stop the page from scrolling
+            e.preventDefault(); // always — never let the page scroll on Space
         }
 
         if (e.repeat) return;
@@ -163,12 +196,14 @@ export function initInput(canvas, hooks) {
             if (n === 2) input.spellHeld2 = true;
         }
 
-        if (!input.locked) return;
         if (e.code === "KeyQ") input.dashPressed = true;
         else if (e.code === "ControlLeft" || e.code === "ControlRight") input.evadePressed = true;
         else if (e.code === "KeyC") input.camResetPressed = true;
-        // Alternate surf toggle — see the note on `input.surf` above.
-        else if (e.code === "KeyF") { _fToggle = !_fToggle; input.surf = _rmbHeld || _fToggle; }
+        // Alternate surf toggle — see the note on `input.surf` above. This one
+        // keeps checking `input.locked`: toggling surf on before the player
+        // has ever locked the pointer would strand them in a mode with no
+        // mouse-driven camera to steer it with.
+        else if (e.code === "KeyF" && input.locked) { _fToggle = !_fToggle; input.surf = _rmbHeld || _fToggle; }
     });
 
     window.addEventListener("keyup", (e) => {
@@ -184,6 +219,7 @@ export function initInput(canvas, hooks) {
         input.surf = false;
         input.spellHeld2 = false;
         input.jumpHeld = false;
+        input.jumpPressed = false;
     });
 }
 
