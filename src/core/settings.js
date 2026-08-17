@@ -94,14 +94,23 @@ export const S = {
     showSpells: true,
     /** Brightness of the dynamic lights the spells emit. */
     spellLight: 1.0,
-    /** Density of the spray every spell throws. */
+    /** Density of the spray every spell throws — the five abilities' shared
+     *  "ability particle density" control. */
     spellSpray: 1.0,
     /**
-     * Artistic scale on the water's absorption path — glacial melt at one end,
-     * tap water at the other. The right value depends on the sun elevation, so
-     * it is a slider rather than a constant.
+     * Artistic scale on how strongly compaction darkens the shared spell
+     * sand-mass material (Dune Surge, Sand Lance, Sand Eruption, Sand Vortex —
+     * see `water.fragment.wgsl`). Carried over under its SNOWFLOW name/uniform
+     * slot rather than renamed; the right value still depends on the sun
+     * elevation, so it stays a slider rather than a constant.
      */
     waterDepthTint: 1.0,
+    /** Sand Eruption column height multiplier. */
+    eruptionHeightScale: 1.0,
+    /** Sand Vortex column/excavation radius multiplier. */
+    vortexRadiusScale: 1.0,
+    /** Dune Surge crest height multiplier. */
+    duneSurgeHeightScale: 1.0,
 
     // ------------------------------------------------------------------ post
     taa: true,
@@ -224,7 +233,10 @@ export const SCHEMA = [
             { k: "showSpells", l: "Spells", t: "b" },
             { k: "spellLight", l: "Spell light", t: "f", min: 0, max: 3, step: 0.01 },
             { k: "spellSpray", l: "Spell spray", t: "f", min: 0, max: 2.5, step: 0.01 },
-            { k: "waterDepthTint", l: "Water depth", t: "f", min: 0, max: 3, step: 0.01 },
+            { k: "waterDepthTint", l: "Sand density", t: "f", min: 0, max: 3, step: 0.01 },
+            { k: "duneSurgeHeightScale", l: "Dune Surge height", t: "f", min: 0.3, max: 2, step: 0.01 },
+            { k: "eruptionHeightScale", l: "Eruption height", t: "f", min: 0.3, max: 2, step: 0.01 },
+            { k: "vortexRadiusScale", l: "Vortex radius", t: "f", min: 0.3, max: 2, step: 0.01 },
         ],
     },
     {

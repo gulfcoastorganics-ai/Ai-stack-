@@ -1,24 +1,29 @@
 /**
- * Spell 4 — Crystallise.
+ * Spell 4 — Fulgurite Garden.
  *
- * Water snaps to ice. A formation grows out of the drift at the aim point, and
- * the patch it grew from stays glazed long after the prisms have gone.
+ * SANDSTORM Phase 6: SNOWFLOW's Crystallise, redesigned rather than retinted.
+ * Where ice snapped out of water, this ability drives an intense, focused
+ * heat/electrical discharge into the ground and fuses the sand into glassy,
+ * irregular fulgurite spires — the same two-mechanism split as before, wearing
+ * a completely different substance:
  *
- * Two mechanisms, and the split matters:
+ *   the formation   geometry, in `crystals.js`/`lib/crystal.wgsl`. It grows over
+ *                   about a second and a half, stands for half a minute, and
+ *                   sublimates back into the dune it fused out of. This is the
+ *                   thing the player looks at — irregular, kinked, bent glass
+ *                   tubes now, not straight hexagonal prisms.
+ *   the glaze       the crust channel of the terrain state buffer, which decays
+ *                   on a fifteen-minute constant. This is the thing that
+ *                   satisfies "permanently altering the surface": the sand
+ *                   shader answers a stabilised/crust patch with a much lower
+ *                   roughness and a genuinely reflective surface, so a Fulgurite
+ *                   patch stays visible from across the field as a slick of
+ *                   fused glass in the dune.
  *
- *   the formation   geometry, in `crystals.js`. It grows over about a second and
- *                   a half, stands for half a minute, and sublimates back into
- *                   the drift. This is the thing the player looks at.
- *   the glaze       the ice channel of the terrain state buffer, which decays on
- *                   a fifteen-minute constant. This is the thing that satisfies
- *                   "permanently altering the surface": the snow shader answers
- *                   it with a roughness of 0.07 and a genuinely reflective
- *                   surface, so a Crystallise patch stays visible from across the
- *                   field as a slick of ice.
- *
- * The prisms are planted along a short *spiral* rather than in a disc. A random
- * scatter reads as scattered; a spiral with the crystals getting shorter as they
- * go out reads as something that grew from a centre, which is what it is.
+ * The formations are planted along a short *spiral* rather than in a disc. A
+ * random scatter reads as scattered; a spiral with the spires getting shorter
+ * as they go out reads as something that fused outward from a strike point,
+ * which is what it is.
  */
 
 import { clamp01, smooth01 } from "./bending.js";
@@ -54,9 +59,9 @@ export class Crystallize {
         this.active = true;
 
         // The glaze goes down immediately, under where the formation will be, so
-        // the ground has already changed material by the time the first prism is
-        // tall enough to see. Doing it as the crystals land instead leaves a
-        // beat where ice is standing on ordinary snow.
+        // the ground has already changed material by the time the first spire is
+        // tall enough to see. Doing it as the glass lands instead leaves a beat
+        // where fused glass is standing on ordinary loose sand.
         const f = this.ctx.deform;
         f.brush(x, z, 1.55, 0.10, 0.16, 0.85, 1.0, Math.random() * Math.PI, 1.2, 0.85);
         for (let i = 0; i < 3; i++) {
@@ -68,6 +73,11 @@ export class Crystallize {
                 0.04, 0.10, 0.5, 0.75, a, 1.5, 1.0
             );
         }
+
+        // A short, sharp impact — the moment of the strike, not a rumble. See
+        // the phase notes on camera effects: every other cast gets a restrained
+        // impulse, and this is the "short sharp flash/impact" one.
+        this.ctx.rig.addTrauma(0.16);
     }
 
     /** @param {number} dt */
@@ -86,17 +96,20 @@ export class Crystallize {
         }
 
         // ---- light ---------------------------------------------------------
-        // Bright and tight while it is forming, then a low ember that lasts as
-        // long as the formation does. Ice does not emit, but the snow around a
-        // cluster of refracting prisms under a low sun genuinely does pick up
-        // caustic light, and a small amount of it here is what stops the
-        // formation looking like it was pasted on.
-        const form = 1 - smooth01((this.t - PLANT_TIME) / 0.9);
-        const ember = 0.10 + 0.06 * Math.sin(this.t * 1.7);
-        const k = 0.35 + 12.0 * form;
-        ctx.lights.add(this.x, this.y + 0.55, this.z, 7.5, 0.52, 0.80, 1.0, k * (1 + ember));
+        // Fulgurite Garden gets the strongest dynamic light of the five, by a
+        // wide margin, and it front-loads all of it: extremely bright and hot
+        // while the glass is actively fusing, gone within about a second of the
+        // last spire landing rather than lingering as an ember. That fast decay
+        // is deliberate — the crystal geometry itself carries `vHeat` for the
+        // same "just formed" flash on each formation's own surface (see
+        // `crystals.js`), so this point light only needs to cover the ground
+        // and the sand around the strike while the discharge is actually
+        // happening, not the whole half-minute the glass stands.
+        const form = 1 - smooth01((this.t - PLANT_TIME) / 0.5);
+        const k = 0.9 + 26.0 * form * form;
+        ctx.lights.add(this.x, this.y + 0.55, this.z, 8.0, 1.0, 0.58, 0.20, k);
 
-        // ---- frost spray ---------------------------------------------------
+        // ---- spray -----------------------------------------------------------
         if (this.t < PLANT_TIME + 0.4) this._frost(dt);
 
         // The spell itself is done once the last prism is in; the crystals age
@@ -145,7 +158,7 @@ export class Crystallize {
             STAND + Math.random() * 8
         );
 
-        // A little snow pushed aside where each one broke the surface.
+        // A little sand pushed aside where each spire broke the surface.
         if ((i & 1) === 0) {
             ctx.deform.brush(
                 x, z, radius * 3.2,
@@ -154,7 +167,7 @@ export class Crystallize {
         }
     }
 
-    /** Frost thrown off as the ice breaks the surface. */
+    /** Fine blasted sand thrown off as the glass breaks the surface. */
     _frost(dt) {
         const ctx = this.ctx;
         const sp = ctx.spray;

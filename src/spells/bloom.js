@@ -1,27 +1,39 @@
 /**
- * Spell 3 — Bloom.
+ * Spell 3 — Sand Eruption.
  *
- * A targeted eruption. A column of powder and water bursts up out of the drift,
- * blowing a crater with a raised rim, then falls back as a slow glittering
- * curtain of fallout.
+ * SANDSTORM Phase 6: SNOWFLOW's Bloom, redesigned rather than retinted. A
+ * targeted eruption: the ground pulls inward first, then a column of sand
+ * bursts up out of it, blowing a crater with a raised rim, then falls back as
+ * a slow, sun-caught curtain of granular fallout.
  *
- * Three things run on different clocks and that is the whole design:
+ * Four things run on different clocks and that is the whole design — one more
+ * than SNOWFLOW's Bloom had, because the brief asks the terrain to visibly
+ * contract *before* it erupts rather than cratering on the same frame the
+ * column appears:
  *
- *   the column   fast. Up in a third of a second, held for a beat, then it
- *                collapses back down its own axis rather than fading — the mass
- *                goes back where it came from.
- *   the crater   instant, and permanent. One brush, at the moment of the burst.
- *   the fallout  slow. Four seconds of it, and it is what the player is actually
- *                looking at for most of the spell. A burst with no fallout is a
- *                flash; a burst with fallout is weather.
+ *   the contraction  fast but not instant — a quarter second of the surface
+ *                    visibly pulling down and in at the target, so the burst
+ *                    reads as something that built up rather than something
+ *                    that simply switched on.
+ *   the column       fast. Up in a third of a second, held for a beat, then it
+ *                    collapses back down its own axis rather than fading — the
+ *                    mass goes back where it came from.
+ *   the crater       fires at the same instant the column reaches the surface,
+ *                    permanent from that frame on.
+ *   the fallout      slow. Four seconds of it, and it is what the player is
+ *                    actually looking at for most of the spell — heavy grains
+ *                    ballistic, fine dust suspended, larger sheets falling near
+ *                    the column, all three populations distinct. A burst with
+ *                    no fallout is a flash; a burst with fallout is weather.
  *
- * The column leans. A perfectly vertical cylinder of water reads as a rendered
+ * The column leans. A perfectly vertical cylinder of sand reads as a rendered
  * primitive no matter what is on it, and two degrees of drift with a little
  * sway takes that away completely.
  */
 
 import { PROFILE_TUBE } from "./waterBody.js";
 import { clamp01, smooth01, bell, transport } from "./bending.js";
+import { S } from "../core/settings.js";
 
 const COLS = 34;
 /** Full height of the column at peak, metres. */
@@ -30,14 +42,17 @@ const HEIGHT = 5.6;
  * Radius of the column at its widest, metres.
  *
  * An eruption is a *mass* of material leaving the ground, and the aspect ratio
- * is most of what says so. The water material's absorption is keyed to the
- * radius as well, so a thin column is also a colourless one.
+ * is most of what says so. The sand material's compaction darkening is keyed
+ * to the milkiness/radius relationship as well, so a thin column also reads
+ * as thinner mass rather than just a smaller shape.
  */
 const GIRTH = 0.66;
 /** Seconds from cast to the column being gone. */
 const LIFE = 1.75;
 /** Seconds of fallout after that. */
 const FALLOUT = 3.4;
+/** Seconds the pre-burst surface contraction runs before the column appears. */
+const CONTRACT_TIME = 0.10;
 
 const _rgt = new Float32Array(3);
 
@@ -67,11 +82,17 @@ export class Bloom {
         this.t = 0;
         this._burst = false;
         this._curtainOwed = 0;
-        // A different lean each cast, so two Blooms in the same place are not
-        // the same object twice.
+        // The lean is mostly downwind, with a random component so two
+        // eruptions in the same wind are not the same object twice. This is
+        // the phase's wind-composition requirement in miniature: a Sand
+        // Eruption cast in a strong crosswind visibly leans with it, the way a
+        // real column of ejected material would, while a calm cast still gets
+        // some organic asymmetry from the random term.
+        const wa = (S.windDirection * Math.PI) / 180;
+        const windLean = Math.min(1, S.windStrength * 0.5);
         const a = Math.random() * Math.PI * 2;
-        this._leanX = Math.cos(a) * 0.16;
-        this._leanZ = Math.sin(a) * 0.16;
+        this._leanX = Math.cos(a) * 0.16 * (1 - windLean) + Math.sin(wa) * 0.30 * windLean;
+        this._leanZ = Math.sin(a) * 0.16 * (1 - windLean) + Math.cos(wa) * 0.30 * windLean;
         this.active = true;
     }
 
@@ -86,12 +107,28 @@ export class Bloom {
             return;
         }
 
+        // ---- pre-burst contraction -----------------------------------------
+        // The surface visibly pulls down and in for a quarter of a second
+        // before the column appears — stage 1 of the phase's eruption spec.
+        // A small, growing depression with no berm and no compaction: mass
+        // being drawn inward, not yet displaced anywhere. Writing it every
+        // frame up to the burst (rather than once) is what makes it read as
+        // building rather than switching on.
+        if (!this._burst) {
+            const k = smooth01(this.t / CONTRACT_TIME);
+            ctx.deform.brush(
+                this.x, this.z, 0.55 + 0.35 * k,
+                0.10 * k, 0, 0, 0,
+                0, 1, 1.0
+            );
+        }
+
         // ---- the burst ----------------------------------------------------
         // Fires once, on the frame the column reaches the surface. Everything
-        // that happens at that instant — the crater, the ring of thrown snow,
+        // that happens at that instant — the crater, the ring of thrown sand,
         // the light spike — happens here rather than at trigger time, so they
         // are all the same event.
-        if (!this._burst && this.t >= 0.10) {
+        if (!this._burst && this.t >= CONTRACT_TIME) {
             this._burst = true;
             this._crater();
             this._throw();
@@ -125,7 +162,7 @@ export class Bloom {
             return;
         }
 
-        const top = HEIGHT * env;
+        const top = HEIGHT * S.eruptionHeightScale * env;
         const sway = Math.sin(t * 3.1) * 0.12;
 
         let px = 0, py = 0, pz = 0;
@@ -178,17 +215,15 @@ export class Bloom {
 
         water.setParams(s, PROFILE_TUBE, 0.42, clamp01(env * 1.5), COLS);
 
-        // Two lights: one down in the crater, one riding the head. The crater
-        // one is what actually lights the rim and the fallout around the base,
-        // and it is the reason the effect reads as a hole full of light rather
-        // than a bright column standing on dark ground.
+        // One light, at the origin only — the phase's lighting note is
+        // explicit that this ability gets "subtle illumination near origin
+        // only," not the SNOWFLOW-era pair riding the crater and the column
+        // head both. What is left is enough to keep the crater rim and the
+        // base of the fallout from going flat, without the column reading as
+        // lit from inside the way Fulgurite Garden's glass is meant to.
         ctx.lights.add(
             this.x, this.y + 0.35, this.z,
-            11.0, 0.44, 0.78, 1.0, 22.0 * env
-        );
-        ctx.lights.add(
-            this.x + this._leanX * top * 0.5, this.y + top * 0.92, this.z + this._leanZ * top * 0.5,
-            7.5, 0.55, 0.82, 1.0, 9.0 * env
+            8.0, 0.60, 0.48, 0.30, 6.0 * env
         );
     }
 
@@ -198,10 +233,10 @@ export class Bloom {
         ctx.deform.brush(
             this.x, this.z,
             1.15,
-            0.52,   // depression
-            0.40,   // rim — the mass has to go somewhere and this is where
+            0.52,   // deep central excavation
+            0.40,   // large rim mass — the mass has to go somewhere
             0.72,   // packed by the blast
-            0.30,   // and partly glazed
+            0.30,   // and a little local stabilised crust from the heat of it
             Math.random() * Math.PI,
             1.15,   // very slightly oval, so it is not a stamped circle
             1.0
@@ -222,7 +257,11 @@ export class Bloom {
         ctx.rig.addTrauma(0.28);
     }
 
-    /** The instant of the burst: a hard ring of thrown snow and water. */
+    /**
+     * The instant of the burst: a hard ring of thrown sand — the eruption's
+     * "fast, heavy grains, ballistic" population (`clod`, kind 1) mixed with
+     * finer grain (kind 0), same split SNOWFLOW's throw always had.
+     */
     _throw() {
         const ctx = this.ctx;
         const sp = ctx.spray;
@@ -254,13 +293,15 @@ export class Bloom {
     }
 
     /**
-     * The fallout curtain.
+     * The fallout curtain — the eruption's "fine dust, slowly suspended"
+     * population.
      *
      * Fine, slow, high drag, and *emitted above the player's eye line* over a
      * wide disc, so it drifts down through the frame rather than sitting in a
      * cone over the crater. This is the part of the spell that lasts, and it is
-     * also where the glinting has the best chance of being seen, since every
-     * grain of it is lit by the crater light from below.
+     * also where the glinting has the best chance of being seen — dust this
+     * fine, this high, catches a low sun dramatically on its way down, which
+     * is most of "weather" rather than "flash".
      */
     _curtain(dt) {
         const ctx = this.ctx;
@@ -294,6 +335,49 @@ export class Bloom {
                 0,
                 // High drag: this is meant to hang and settle, not to fly.
                 4.6
+            );
+        }
+
+        this._sheets(dt, k);
+    }
+
+    /**
+     * Larger sand sheets falling near the column — the eruption's third
+     * granular regime, distinct from the ballistic throw and the wide, fine
+     * dust curtain above. Bigger, heavier clumps that separate from the column
+     * close to its own axis and drop almost straight down rather than
+     * dispersing across the wide disc the fine dust covers — the visible
+     * "chunks" of a real sand-fall, not just haze.
+     */
+    _sheets(dt, k) {
+        const ctx = this.ctx;
+        const sp = ctx.spray;
+        if (!sp || k <= 0.02) return;
+
+        const rate = 55 * ctx.sprayScale * k;
+        this._sheetOwed = (this._sheetOwed || 0) + dt * rate;
+        let count = this._sheetOwed | 0;
+        if (count <= 0) return;
+        this._sheetOwed -= count;
+        if (count > 16) count = 16;
+
+        for (let i = 0; i < count; i++) {
+            const a = Math.random() * Math.PI * 2;
+            // Tight to the column's own axis, not the fine dust's wide disc.
+            const r = Math.sqrt(Math.random()) * 1.1;
+            sp.emit(
+                this.x + Math.cos(a) * r,
+                this.y + 1.2 + Math.random() * 2.6,
+                this.z + Math.sin(a) * r,
+                (Math.random() - 0.5) * 0.5,
+                -0.6 - Math.random() * 1.4,
+                (Math.random() - 0.5) * 0.5,
+                0.07 + Math.random() * 0.06,
+                0.9 + Math.random() * 0.7,
+                1,
+                // Moderate drag: heavier than the dust, but still a clump of
+                // loose grain, not a solid clod — it falls, it does not fly.
+                1.6
             );
         }
     }

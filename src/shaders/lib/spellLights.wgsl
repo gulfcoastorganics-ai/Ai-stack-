@@ -8,8 +8,8 @@
 // instead of 150 million kilometres.
 //
 // So every light here runs the identical `snowSubsurface` the sun runs. Stand a
-// glowing ribbon of water on a berm and the near face goes bright while the
-// *far* side of the crest glows through, because the light entered the snow and
+// glowing spell body on a berm and the near face goes bright while the *far*
+// side of the crest glows through, because the light entered the sand and
 // came back out. Dropping that
 // term and keeping only the diffuse is the difference between a spell that lights
 // the snow and a spell that has a decal of light under it.
@@ -87,11 +87,12 @@ fn spellLighting(
     return acc;
 }
 
-/// The same lights, for a surface that is not snow — fabric, fur, water, ice.
+/// The same lights, for a surface that is not the terrain — fabric, fur, the
+/// spell sand mass, fulgurite glass.
 ///
-/// Diffuse plus a GGX lobe, with a wrap term that the caller sizes: wool wraps a
-/// long way, wet ice barely at all. No transmission, because the materials that
-/// want it (the robe's thin under-layer, the water body itself) already have
+/// Diffuse plus a GGX lobe, with a wrap term that the caller sizes: cloth wraps
+/// a long way, glass barely at all. No transmission, because the materials that
+/// want it (the coat's thin lining, the spell sand mass itself) already have
 /// their own and would double-count.
 fn spellLightingSurface(
     world: vec3f,

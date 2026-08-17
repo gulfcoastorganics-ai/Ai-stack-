@@ -112,6 +112,8 @@ export class SpellSystem {
         /** 0..1 eased: how far into a casting stance the figure should be. */
         this.castBlend = 0;
         this._lastCast = -99;
+        /** Which ability (1..5) last drove a cast, for the per-ability pose. */
+        this._lastCastKey = 0;
         this._time = 0;
         /** Console override for the Ribbon hold. */
         this.debugRibbon = false;
@@ -173,11 +175,17 @@ export class SpellSystem {
 
         // The casting stance eases in while anything is up and out again after.
         // Nothing about it is a switch.
+        if (this.ribbon.active) this._lastCastKey = 2;
         const casting =
             this.ribbon.active || this._time - this._lastCast < 0.55 ? 1 : 0;
         this.castBlend = expDamp(this.castBlend, casting, casting ? 7.0 : 3.2, dt);
         const ch = this.ctx.controller;
         ch.cast = this.castBlend;
+        // Which ability the current (or just-finished) cast stance belongs to
+        // — see `figure.js`'s per-ability arm gesture. Held at its last value
+        // while `castBlend` eases back out, so the pose does not snap to
+        // "neutral" mid-ease.
+        ch.castKind = casting ? this._lastCastKey : ch.castKind || 0;
         ch.castAimX = this.aim.x;
         ch.castAimY = this.aim.y;
         ch.castAimZ = this.aim.z;
@@ -219,6 +227,7 @@ export class SpellSystem {
         }
 
         this._lastCast = this._time;
+        this._lastCastKey = key;
 
         if (key === 1) {
             // Flat aim: the crescent runs along the ground, so a camera pointed

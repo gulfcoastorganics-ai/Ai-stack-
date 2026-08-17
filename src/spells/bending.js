@@ -98,7 +98,7 @@ export function transport(out, o, rx, ry, rz, t0x, t0y, t0z, t1x, t1y, t1z) {
 }
 
 /**
- * Where a ray meets the snow.
+ * Where a ray meets the sand.
  *
  * A coarse march followed by a bisection refine, against the CPU height mirror.
  * Eight refinement steps put the hit inside a centimetre, which is finer than

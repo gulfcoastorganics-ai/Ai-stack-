@@ -71,6 +71,9 @@ export class CharacterController {
         this.castAimX = 0;
         this.castAimY = 0;
         this.castAimZ = 1;
+        /** Which ability (1..5) the current/last cast pose belongs to. See
+         *  `figure.js`'s per-ability arm gesture. */
+        this.castKind = 0;
 
         /** Signed lean, -1..1 (right positive), from lateral acceleration. */
         this.lean = 0;

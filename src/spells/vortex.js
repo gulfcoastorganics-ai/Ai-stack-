@@ -1,32 +1,45 @@
 /**
- * Spell 5 — Vortex.
+ * Spell 5 — Sand Vortex.
  *
- * A swirling column of airborne snow around the player that visibly *strips*
- * surface snow from the ground, holds it aloft, and lets it settle back.
+ * SANDSTORM Phase 6: SNOWFLOW's Vortex, redesigned rather than retinted. A
+ * rotating column of airborne sand around the player that visibly *excavates*
+ * a shallow spiral depression in the ground beneath it, pulls loose surface
+ * mass toward its centre, holds a swirling mass of grain aloft, and lets it
+ * settle back as the spell fades.
  *
- * The stripping is the point, and it is the one thing here that no other spell
- * does: this is the only effect in the demo that takes the terrain state buffer
- * *back*. A brush with a negative depression is a perfectly ordinary brush as
- * far as the simulation is concerned — the accumulation is additive and the
- * clamp floors it at zero — so "remove snow from a ring" and "put it back" are
- * the same code path as everything else, with a sign on it.
+ * The ground interaction is the point, and it is the one thing here that no
+ * other ability does in quite this shape: this is the only effect that takes
+ * the terrain state buffer *back* before giving it. A brush with a negative
+ * depression is a perfectly ordinary brush as far as the simulation is
+ * concerned — the accumulation is additive and the clamp floors it at zero —
+ * so "pull sand from a ring toward the centre" and "let it back down" are the
+ * same code path as everything else, with a sign on it.
  *
- * The airborne mass is two systems working from one description:
+ * The airborne mass is three layers working from one description, matching
+ * the phase brief's inner-core/main-helix/outer-dust structure:
  *
- *   three helices   swept tubes of dense slush, wound around the player and
- *                   rotating. These give the column a readable *shape*; a vortex
- *                   made only of particles is a cloud, and a cloud does not
- *                   spiral.
- *   the grains      emitted continuously *along those same helices*, with the
- *                   helix's own tangential velocity, and short-lived enough that
- *                   they never get far from the path that launched them. That is
- *                   how the spray swirls without the particle simulation needing
- *                   to know what a vortex is — the same trick the surf plume uses
- *                   to leave the crest the mesh is actually drawing.
+ *   the helices    swept tubes of dense, compacted sand, wound around the
+ *                  player and rotating. These give the column a readable
+ *                  *shape* — a vortex made only of particles is a cloud, and a
+ *                  cloud does not spiral. This is the "main helix" layer.
+ *   the core       a fast, narrow, tightly-wound population of grains emitted
+ *                  close to the axis with a strong upward bias — the inner
+ *                  core the brief calls for, distinct from the helices'
+ *                  visible ribbons.
+ *   the dust       a broader, slower, wind-stretched population riding further
+ *                  out — see `_dust`. Both grain populations are emitted
+ *                  continuously *along the same helices* that give the column
+ *                  its shape, with the helix's own tangential velocity, and
+ *                  short-lived enough that they never get far from the path
+ *                  that launched them. That is how the spray swirls without
+ *                  the particle simulation needing to know what a vortex is —
+ *                  the same trick the surf plume uses to leave the crest the
+ *                  mesh is actually drawing.
  */
 
 import { PROFILE_TUBE } from "./waterBody.js";
 import { clamp01, smooth01, bell, transport } from "./bending.js";
+import { S } from "../core/settings.js";
 
 /** How many helices. Three reads as a spiral; two reads as a double helix. */
 const HELICES = 3;
@@ -57,8 +70,13 @@ export class Vortex {
         this.spin = 0;
         this._stripOwed = 0;
         this._grainOwed = 0;
+        this._dustOwed = 0;
+        /** Slow downwind drift accumulated since trigger, metres. */
+        this._driftX = 0;
+        this._driftZ = 0;
         /** How far out the stripping ring has reached, metres. */
         this.ring = 0.9;
+        this._shakeOwed = 0;
     }
 
     trigger() {
@@ -70,6 +88,10 @@ export class Vortex {
         this.ring = 0.9;
         this._stripOwed = 0;
         this._grainOwed = 0;
+        this._dustOwed = 0;
+        this._driftX = 0;
+        this._driftZ = 0;
+        this._shakeOwed = 0;
         this.active = true;
     }
 
@@ -85,10 +107,23 @@ export class Vortex {
             return;
         }
 
-        // The column follows the player. It is *their* vortex — walking out of
-        // it would be the single most effect-like thing it could do.
-        this.x = ctx.controller.position.x;
-        this.z = ctx.controller.position.z;
+        // The column follows the player, plus a slow downwind drift — the
+        // phase brief allows the vortex to drift with prevailing wind, and the
+        // existing spell control (the column is already re-centred every
+        // frame) supports it cleanly: accumulate a small offset from the wind
+        // vector and add it on top of the player's position instead of
+        // replacing it. Capped well short of a metre so it reads as "leaning
+        // with the wind" rather than "wandering off".
+        const wa = (S.windDirection * Math.PI) / 180;
+        this._driftX += Math.sin(wa) * S.windStrength * 0.35 * dt;
+        this._driftZ += Math.cos(wa) * S.windStrength * 0.35 * dt;
+        const driftMag = Math.hypot(this._driftX, this._driftZ);
+        if (driftMag > 1.1) {
+            const k = 1.1 / driftMag;
+            this._driftX *= k; this._driftZ *= k;
+        }
+        this.x = ctx.controller.position.x + this._driftX;
+        this.z = ctx.controller.position.z + this._driftZ;
 
         const env = smooth01(this.t / RAMP) * (1 - smooth01((this.t - RAMP - HOLD) / FADE));
         // Spins up and keeps spinning: the rotation does not ease out with the
@@ -98,12 +133,32 @@ export class Vortex {
 
         this._helices(env);
         this._strip(dt, env);
-        this._grains(dt, env);
+        this._core(dt, env);
+        this._dust(dt, env);
+        this._shake(dt, env);
 
+        // Little to no emission — see the phase's lighting-integration note.
+        // What is left is a faint contact hint at the base, not a glow filling
+        // the column; Fulgurite Garden is where the strong light budget goes.
         ctx.lights.add(
-            this.x, ctx.terrain.heightAt(this.x, this.z) + 1.3, this.z,
-            9.0, 0.46, 0.74, 1.0, 9.0 * env
+            this.x, ctx.terrain.heightAt(this.x, this.z) + 0.4, this.z,
+            3.5, 0.55, 0.46, 0.32, 1.4 * env
         );
+    }
+
+    /**
+     * A subtle rotational vibration while the vortex holds, rather than one
+     * discrete impulse. Small, frequent pulses timed off the spin rather than
+     * a single `addTrauma` call at trigger — this is meant to read as standing
+     * near a turbulent, spinning mass, not as a single event's kick.
+     */
+    _shake(dt, env) {
+        if (env < 0.1) return;
+        this._shakeOwed += dt;
+        const per = 1 / (HELICES * 1.7); // roughly once per helix per rotation-ish beat
+        if (this._shakeOwed < per) return;
+        this._shakeOwed -= per;
+        this.ctx.rig.addTrauma(0.025 * env);
     }
 
     /** Lay the three helices. */
@@ -128,10 +183,10 @@ export class Vortex {
                 // lift — so `u` runs downward, matching every other strand.
                 const h = 1 - u;
                 const ang = phase + this.spin + h * TURNS * Math.PI * 2;
-                // Wide at the bottom where it is picking snow up, narrower and
+                // Wide at the bottom where it is picking sand up, narrower and
                 // faster at the top. Not a cone: the waist is what makes it read
                 // as a vortex rather than as a party hat.
-                const r = (2.55 - 1.15 * h) * (0.78 + 0.34 * bell(clamp01(h * 1.2)));
+                const r = (2.55 - 1.15 * h) * (0.78 + 0.34 * bell(clamp01(h * 1.2))) * S.vortexRadiusScale;
 
                 const x = this.x + Math.cos(ang) * r;
                 const z = this.z + Math.sin(ang) * r;
@@ -149,13 +204,13 @@ export class Vortex {
                     rx = 0; ry = 1; rz = 0;
                 }
 
-                // Both ends taper to nothing: the top because the snow is
+                // Both ends taper to nothing: the top because the sand is
                 // dispersing, the bottom because it is still on the ground.
                 //
                 // Thin. The helices are here to give the column a readable
                 // *shape*, not to be the column: the mass of it is the grains,
                 // and a fat ribbon takes the reading away from them and turns
-                // the spell into three solid loops with some snow near it.
+                // the spell into three solid loops with some sand near it.
                 // Monotonic in `u`, with one slow modulation and nothing else.
                 // Several terms keyed to world distance reach the sample Nyquist
                 // and pinch the tube shut wherever their zeros line up, which
@@ -184,28 +239,33 @@ export class Vortex {
                 px = x; py = y; pz = z;
             }
 
-            // Almost entirely opaque: this is lifted snow, not water. The small
-            // amount of transparency left is what lets the far side of the
-            // column show through the near side, which is most of what makes it
-            // read as a rotating volume.
+            // Almost entirely opaque: this is lifted, compacted sand, not
+            // water. The small amount of transparency left is what lets the
+            // far side of the column show through the near side, which is
+            // most of what makes it read as a rotating volume.
             water.setParams(s, PROFILE_TUBE, 0.88, clamp01(env * 1.3), COLS);
         }
     }
 
     /**
-     * Strip the ground, then give it back.
+     * Excavate the ground, then give it back.
      *
      * The ring grows outward while the spell holds and retreats while it fades,
-     * so the snow comes back from the outside in — which is what settling snow
-     * does, since the outermost material was lifted the least far.
+     * so the sand comes back from the outside in — which is what settling
+     * sand does, since the outermost material was lifted the least far. This
+     * is also where the phase's "pull loose mass toward centre" and "disturb
+     * nearby footprints" terrain-interaction requirements live: the excavation
+     * ring itself *is* the pull, scouring a shallow spiral trench inward as it
+     * rotates rather than lifting sand from a static footprint of holes.
      */
     _strip(dt, env) {
         const ctx = this.ctx;
         const f = ctx.deform;
 
         const holding = this.t < RAMP + HOLD;
+        const ringMax = 3.1 * S.vortexRadiusScale;
         this.ring = holding
-            ? Math.min(3.1, this.ring + dt * 0.85)
+            ? Math.min(ringMax, this.ring + dt * 0.85)
             : Math.max(0.9, this.ring - dt * 2.2);
 
         this._stripOwed += dt;
@@ -214,20 +274,24 @@ export class Vortex {
         this._stripOwed = 0;
 
         const N = 9;
-        // Holding: take snow away — depression up, no berm, because the mass is
-        // in the air rather than piled at the rim. Fading: put it back, as
+        // Holding: take sand away — depression up, no berm, because the mass
+        // is in the air rather than piled at the rim. Fading: put it back, as
         // negative depression plus a little loose berm, because what lands is
-        // broken snow sitting proud of what it fell on.
+        // broken sand sitting proud of what it fell on.
         const give = holding ? -1 : 1;
 
+        const sp = ctx.spray;
         for (let i = 0; i < N; i++) {
             // Rotating with the column, so the ring is scoured rather than
-            // stamped: a fixed set of angles leaves nine radial scars.
+            // stamped: a fixed set of angles leaves nine radial scars, and the
+            // rotation itself is what reads as a spiral being drawn inward
+            // rather than a ring of static pits.
             const a = (i / N) * Math.PI * 2 + this.spin * 0.6;
             const r = this.ring * (0.82 + Math.random() * 0.3);
+            const bx = this.x + Math.cos(a) * r;
+            const bz = this.z + Math.sin(a) * r;
             f.brush(
-                this.x + Math.cos(a) * r,
-                this.z + Math.sin(a) * r,
+                bx, bz,
                 0.55,
                 give < 0 ? 0.95 * k * env : -1.7 * k,
                 give < 0 ? 0.05 * k * env : 0.85 * k,
@@ -235,19 +299,42 @@ export class Vortex {
                 0,
                 a + Math.PI * 0.5, 1.9, 1.0
             );
+
+            // Occasional heavier clumps thrown clear of the excavation ring —
+            // the phase's "throw occasional clumps outward" ground-interaction
+            // note. Sparse and only while actively holding, so it reads as an
+            // occasional heavier fragment rather than a constant spray on top
+            // of the core/dust populations above.
+            if (sp && holding && Math.random() < 0.05 * env) {
+                const by = ctx.terrain.heightAt(bx, bz);
+                sp.emit(
+                    bx, by + 0.1, bz,
+                    Math.cos(a) * (2.0 + Math.random() * 2.5),
+                    1.5 + Math.random() * 2.5,
+                    Math.sin(a) * (2.0 + Math.random() * 2.5),
+                    0.05 + Math.random() * 0.05,
+                    0.7 + Math.random() * 0.6,
+                    1,
+                    0.7
+                );
+            }
         }
     }
 
     /**
-     * The airborne grains.
+     * The inner core — fast, narrow-radius grains with a strong upward bias,
+     * hugging the column's own axis well inside the helices' own radius. This
+     * is the layer that reads as "something violently lifting mass," distinct
+     * from the helices' visible spiral shape and the broader outer dust below.
      *
-     * Emitted at a point on one of the helices with that helix's own tangential
-     * velocity, and given a life short enough (a third of a second) that a
-     * straight-line integration never visibly departs from the curve it was
-     * launched along. Nothing in the particle system knows this is a vortex; the
-     * swirl is entirely in where and how the grains are born.
+     * Emitted at a point loosely following the nearest helix's rotation, but
+     * pulled in hard toward the axis rather than riding the helix's own
+     * radius, and given a life short enough that a straight-line integration
+     * never visibly departs from the curve it was launched along. Nothing in
+     * the particle system knows this is a vortex; the swirl is entirely in
+     * where and how the grains are born.
      */
-    _grains(dt, env) {
+    _core(dt, env) {
         const ctx = this.ctx;
         const sp = ctx.spray;
         if (!sp || env < 0.05) return;
@@ -262,14 +349,15 @@ export class Vortex {
         const groundY = ctx.terrain.heightAt(this.x, this.z);
 
         for (let k = 0; k < count; k++) {
-            // Weighted toward the bottom, where the snow is being picked up.
+            // Weighted toward the bottom, where the sand is being picked up.
             const h = Math.random() * Math.random();
             const hIdx = (Math.random() * HELICES) | 0;
             const phase = (hIdx / HELICES) * Math.PI * 2;
             const ang = phase + this.spin + h * TURNS * Math.PI * 2
                       + (Math.random() - 0.5) * 0.9;
-            const r = (2.55 - 1.15 * h) * (0.78 + 0.34 * bell(clamp01(h * 1.2)))
-                    * (0.85 + Math.random() * 0.35);
+            // Narrow: a fraction of the helices' own radius, so the core reads
+            // as a distinct tight column inside the wider spiral shape.
+            const r = (0.55 - 0.20 * h) * (0.7 + 0.5 * Math.random());
 
             const cs = Math.cos(ang);
             const sn = Math.sin(ang);
@@ -283,7 +371,10 @@ export class Vortex {
                 groundY + TOP * h * env + 0.06 + Math.random() * 0.2,
                 this.z + sn * r,
                 vx + cs * (Math.random() - 0.6) * 1.2,
-                1.4 + Math.random() * 3.4 + (1 - h) * 2.5,
+                // Strong upward velocity — the core's defining trait per the
+                // phase brief, raised from the helix-radius population this
+                // replaced so it visibly outruns the helices on its way up.
+                3.2 + Math.random() * 4.6 + (1 - h) * 3.0,
                 vz + sn * (Math.random() - 0.6) * 1.2,
                 0.028 + Math.random() * 0.062,
                 0.30 + Math.random() * 0.26,
@@ -291,6 +382,67 @@ export class Vortex {
                 // Low drag, short life: it holds the launch velocity for the
                 // whole of its life, which is what keeps it on the spiral.
                 0.9
+            );
+        }
+    }
+
+    /**
+     * The outer dust — broad, turbulent, slower-rotating, and stretched
+     * downwind. The phase brief's third layer, and the one place a vortex is
+     * explicitly asked to respond to the *same* prevailing wind the terrain
+     * and the character's cloth already do: the further out a grain is
+     * emitted, the more its velocity is nudged toward the wind vector rather
+     * than staying purely tangential, so the whole outer envelope leans and
+     * trails downwind while the inner core and the helices stay put on axis.
+     */
+    _dust(dt, env) {
+        const ctx = this.ctx;
+        const sp = ctx.spray;
+        if (!sp || env < 0.05) return;
+
+        const rate = 700 * ctx.sprayScale * env;
+        this._dustOwed += dt * rate;
+        let count = this._dustOwed | 0;
+        if (count <= 0) return;
+        this._dustOwed -= count;
+        if (count > 90) count = 90;
+
+        const groundY = ctx.terrain.heightAt(this.x, this.z);
+        const wa = (S.windDirection * Math.PI) / 180;
+        const windX = Math.sin(wa) * (1.5 + 2.5 * S.windStrength);
+        const windZ = Math.cos(wa) * (1.5 + 2.5 * S.windStrength);
+
+        for (let k = 0; k < count; k++) {
+            const h = Math.random();
+            // Wider than the helices' own radius and wider still than the
+            // core — the broad, loosely-held envelope around the coherent
+            // shape.
+            const r = (2.55 - 1.15 * h) * (1.15 + 0.55 * Math.random()) * S.vortexRadiusScale;
+            const ang = this.spin * 0.6 + h * TURNS * Math.PI * 1.2
+                      + Math.random() * Math.PI * 2;
+            const cs = Math.cos(ang);
+            const sn = Math.sin(ang);
+            // Slower rotation than the core or the helices, and blended
+            // toward the wind vector rather than staying purely tangential —
+            // the further out, the more the wind wins.
+            const speed = 2.2 + 1.6 * (1 - h);
+            const windMix = 0.55;
+            const vx = -sn * speed * (1 - windMix) + windX * windMix;
+            const vz = cs * speed * (1 - windMix) + windZ * windMix;
+
+            sp.emit(
+                this.x + cs * r,
+                groundY + TOP * h * env * 0.7 + 0.1 + Math.random() * 0.6,
+                this.z + sn * r,
+                vx + (Math.random() - 0.5) * 0.8,
+                0.6 + Math.random() * 1.6,
+                vz + (Math.random() - 0.5) * 0.8,
+                0.032 + Math.random() * 0.05,
+                0.9 + Math.random() * 0.9,
+                0,
+                // Higher drag than the core: this is loose, wind-dominated
+                // dust, not grain still carrying launch momentum.
+                2.6
             );
         }
     }

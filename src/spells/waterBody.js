@@ -1,11 +1,23 @@
 /**
- * The bent-water renderer — one mesh, one material, one draw, eight strands.
+ * The shared coherent-sand-mass renderer — one mesh, one material, one draw,
+ * eight strands.
  *
- * Four of the five spells move a coherent body of water, and they are all the
- * same object: a swept surface along a spine, with a radius, a transported frame
+ * SANDSTORM Phase 6: SNOWFLOW built this as its "bent-water renderer," and the
+ * name — this file, `PROFILE_TUBE`/`PROFILE_SHEET`, `acquire`/`column`/`release`
+ * — is unchanged, deliberately. Nothing below is water-specific: it is a swept
+ * surface along a spine, with a radius, a transported frame and an edge-weight
+ * channel, and it renders whatever `water.fragment.wgsl` decides that surface is
+ * made of — which, as of this phase, is displaced granular sand for four of the
+ * five abilities (Dune Surge, Sand Lance, Sand Eruption, Sand Vortex; Fulgurite
+ * Garden uses the separate `crystals.js` glass system instead). Renaming the
+ * geometry layer to match would touch every one of those four spell files for
+ * no behavioural gain — see `water.fragment.wgsl`'s own header note.
+ *
+ * All four abilities share this one object because they are, structurally, the
+ * same thing: a swept surface along a spine, with a radius, a transported frame
  * and a foam channel. Giving each spell its own mesh would mean four pipelines,
  * four warm-ups, four sets of shadow-and-fog uniforms, and four slightly
- * different ideas about what lit water looks like. There is one of each here.
+ * different ideas about what lit sand looks like. There is one of each here.
  *
  * A strand is claimed with `acquire()`, written per frame with `column()`, and
  * dropped with `release()`. Releasing zeroes the strand's rows, which is also how
@@ -14,11 +26,11 @@
  * call and the vertex count therefore do not depend on how many spells are up.
  *
  * The frame is parallel-transported along the spine on the CPU rather than
- * rebuilt from a fixed up-vector. A ribbon drawn through the air passes through
- * vertical, and a Frenet or up-referenced frame flips there — the section spins
- * 180 degrees in one sample and the ribbon visibly folds. Transport has no such
- * degeneracy: each frame is the previous one rotated by the minimum rotation
- * taking the old tangent to the new one.
+ * rebuilt from a fixed up-vector. A held stream drawn through the air passes
+ * through vertical, and a Frenet or up-referenced frame flips there — the
+ * section spins 180 degrees in one sample and the body visibly folds. Transport
+ * has no such degeneracy: each frame is the previous one rotated by the minimum
+ * rotation taking the old tangent to the new one.
  *
  * Allocation per frame: none.
  */
@@ -60,7 +72,7 @@ export const STRAND_COLS = 64;
  * through the samples, so it has real curvature between them; drawing it at
  * barely more than one vertex per sample renders that curvature as a polygon and
  * the body comes out visibly segmented — the thing that makes a swept tube look
- * like a length of pipe rather than like moving water. Nearly three vertices per
+ * like a length of pipe rather than like moving sand. Nearly three vertices per
  * sample is where the segmentation stops being findable.
  *
  * It is also the sampling rate the relief field has to stay under; see the note
@@ -78,7 +90,7 @@ const LATTICE_COLS = 176;
  *
  * Twenty-four rather than twelve. A twelve-sided tube seen at two metres has a
  * readable dodecagonal silhouette, and once you have noticed it you cannot stop:
- * it is the single clearest tell that the water is a mesh. It also caps how much
+ * it is the single clearest tell that the sand mass is a mesh. It also caps how much
  * detail the relief field is allowed to put *around* the section — and detail
  * around the section, rather than along it, is exactly what stops a tube reading
  * as a string of beads.
@@ -122,9 +134,9 @@ export class WaterBody {
         this.mesh = buildLattice(scene);
         this.material = this._makeMaterial();
         this.mesh.material = this.material;
-        // With the spray, after the opaque pass. Water first: mist hanging in
-        // front of a body of water is much commoner than the reverse, and
-        // neither writes depth.
+        // With the spray, after the opaque pass. Sand mass first: dust hanging
+        // in front of a body of displaced sand is much commoner than the
+        // reverse, and neither writes depth.
         this.mesh.renderingGroupId = 2;
         this.mesh.alphaIndex = 0;
         this.mesh.isVisible = false;
@@ -208,7 +220,8 @@ export class WaterBody {
      * Per-strand constants for this frame.
      * @param {number} s
      * @param {number} profile PROFILE_TUBE or PROFILE_SHEET
-     * @param {number} milkiness 0 clear water, 1 opaque slush
+     * @param {number} milkiness 0 loose sunlit grain, 1 dense compacted mass —
+     *   kept its SNOWFLOW name; see `water.fragment.wgsl`'s header note
      * @param {number} alpha global fade, 0 hides the strand
      * @param {number} count live columns, 2..STRAND_COLS
      */
@@ -322,8 +335,8 @@ export class WaterBody {
      * Compile behind the loading screen.
      *
      * Two synthetic strands are laid and **left standing**, so the warm-up frames
-     * in `main` actually rasterise water. `finishWarmUp` takes them down
-     * afterwards.
+     * in `main` actually rasterise the sand-mass material. `finishWarmUp` takes
+     * them down afterwards.
      *
      * Leaving them up is the whole point. `isReady()` compiles the shader
      * *modules*; it does not create the WebGPU *render pipeline*, which is keyed

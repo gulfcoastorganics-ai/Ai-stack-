@@ -25,6 +25,7 @@ varying vBase: vec3f;
 varying vHeight01: f32;
 varying vSeed: f32;
 varying vGrowth: f32;
+varying vHeat: f32;
 varying vViewDist: f32;
 
 @vertex
@@ -39,12 +40,16 @@ fn main(input: VertexInputs) -> FragmentInputs {
 
     vertexOutputs.vWorld = P;
     vertexOutputs.vBase = a.xyz;
-    // Fraction of the way up the crystal, which is what the frost and the
-    // absorption path are both keyed to: the base is buried in the drift and
-    // milky, the tip is clear and lit through.
+    // Fraction of the way up the formation, which is what the fused-base
+    // gradient and the absorption path are both keyed to: the base is fused
+    // with the sand it grew through, the tip is clear glass lit through.
     vertexOutputs.vHeight01 = clamp((P.y - a.y) / max(a.w, 1e-3), 0.0, 1.0);
     vertexOutputs.vSeed = c.y;
     vertexOutputs.vGrowth = c.x;
+    // Formation heat — see `crystals.js`'s `update()`: high while still
+    // forming, decaying fast once grown. Row 2's fourth channel, unused by
+    // SNOWFLOW's ice.
+    vertexOutputs.vHeat = c.w;
     vertexOutputs.vViewDist = distance(P, uniforms.cameraPos);
     vertexOutputs.position = uniforms.viewProjection * vec4f(P, 1.0);
 }

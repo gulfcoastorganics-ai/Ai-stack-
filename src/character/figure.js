@@ -550,27 +550,81 @@ export class Figure {
             let tz = _sh[2] + fZ * (sw * 0.38) - uZ * 0.43 + rZ * (sgn * 0.11);
             ty += idle * sgn;
 
-            // ---- cast target: both hands up and out along the aim -----------
+            // ---- cast target: one gesture per ability -------------------------
             //
-            // A wide base, the leading hand extended along the flow and the
-            // trailing hand drawn back across the body, so the arms describe the
-            // arc the water is about to take. The right hand leads because that
-            // is the hand the ribbon is emitted from.
+            // SANDSTORM Phase 6: SNOWFLOW had one cast pose for all five spells
+            // — both hands up and out along the aim. The phase brief asks for a
+            // distinct silhouette per ability instead (`ch.castKind`, set by
+            // `spellSystem.js` to whichever ability last drove the cast blend),
+            // built from the same shoulder/arm-target machinery so nothing about
+            // the IK solve below or the walk-swing composition changes.
             //
             // Blended, not switched, and it composes with the walk swing rather
             // than replacing it — a character casting while walking still walks.
             const cast = ch.cast;
             if (cast > 0.001) {
                 const ax = ch.castAimX, ay = ch.castAimY, az = ch.castAimZ;
-                // The leading hand reaches along the aim; the trailing one sits
-                // low and inboard, cocked back.
                 const lead = a === 1 ? 1 : 0;
-                const outward = lead ? 0.30 : -0.16;
-                const along = lead ? 0.52 : 0.16;
-                const lift = lead ? 0.26 : 0.02;
-                const cx = _sh[0] + rX * (sgn * 0.30 + outward * sgn) + ax * along + uX * lift;
-                const cy = _sh[1] + rY * (sgn * 0.30) + ay * along + uY * lift + lift * 0.6;
-                const cz = _sh[2] + rZ * (sgn * 0.30 + outward * sgn) + az * along + uZ * lift;
+                let outward, along, lift, useAim;
+
+                switch (ch.castKind) {
+                    case 1:
+                        // Dune Surge — strong forward arm sweep: both hands
+                        // drive forward together along the character's own
+                        // facing rather than the aim, low, the lead hand
+                        // further out ahead of the trailing one — a slam, not
+                        // a raised stance.
+                        outward = lead ? 0.14 : -0.10;
+                        along = lead ? 0.60 : 0.26;
+                        lift = lead ? -0.06 : -0.14;
+                        useAim = false;
+                        break;
+                    case 3:
+                        // Sand Eruption — upward lifting gesture: both hands
+                        // rise together, cupped close to the body's own
+                        // centreline rather than spread wide, as though
+                        // lifting a mass up out of the ground.
+                        outward = -0.05;
+                        along = 0.10;
+                        lift = 0.62;
+                        useAim = false;
+                        break;
+                    case 4:
+                        // Fulgurite Garden — focused downward/forward cast:
+                        // both hands thrust down and forward together, close
+                        // to the body's centreline, along the aim — a single
+                        // concentrated point rather than a wide stance.
+                        outward = -0.04;
+                        along = 0.42;
+                        lift = -0.30;
+                        useAim = true;
+                        break;
+                    case 5:
+                        // Sand Vortex — wide rotational arm gesture: both arms
+                        // spread wide to the sides and slowly counter-rotate,
+                        // rather than reaching forward at all.
+                        outward = 0.52 + Math.sin(this._t * 1.6 + sgn * 1.7) * 0.06;
+                        along = 0.06;
+                        lift = 0.10 + Math.cos(this._t * 1.6 + sgn * 1.7) * 0.05;
+                        useAim = false;
+                        break;
+                    default:
+                        // Sand Lance (2) and any unset case — one hand
+                        // controls the stream: the leading hand reaches out
+                        // along the aim, the trailing one sits low and
+                        // inboard, cocked back, same shape SNOWFLOW's single
+                        // pose used.
+                        outward = lead ? 0.30 : -0.16;
+                        along = lead ? 0.52 : 0.16;
+                        lift = lead ? 0.26 : 0.02;
+                        useAim = true;
+                        break;
+                }
+
+                const dx = useAim ? ax : fX, dy = useAim ? ay : fY, dz = useAim ? az : fZ;
+                const cx = _sh[0] + rX * (sgn * 0.30 + outward * sgn) + dx * along + uX * lift;
+                const cy = _sh[1] + rY * (sgn * 0.30) + dy * along + uY * lift + lift * 0.6;
+                const cz = _sh[2] + rZ * (sgn * 0.30 + outward * sgn) + dz * along + uZ * lift;
                 tx += (cx - tx) * cast;
                 ty += (cy - ty) * cast;
                 tz += (cz - tz) * cast;

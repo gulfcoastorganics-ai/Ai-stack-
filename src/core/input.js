@@ -23,7 +23,7 @@ export const input = {
 
     /** @type {number} 0 = none, else 1..5 — set on keydown, cleared each frame */
     spellPressed: 0,
-    /** @type {boolean} spell 2 (Ribbon) is a held cast */
+    /** @type {boolean} spell 2 (Sand Lance) is a held cast */
     spellHeld2: false,
 
     locked: false,

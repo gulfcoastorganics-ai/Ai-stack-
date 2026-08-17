@@ -1,15 +1,22 @@
 /**
- * Spell 1 — Sweep.
+ * Spell 1 — Dune Surge.
  *
- * A crescent of slush rises out of the ground ahead of the player and runs
- * outward, ploughing a channel and throwing berms to either side.
+ * SANDSTORM Phase 6: SNOWFLOW's Sweep, redesigned rather than retinted. The
+ * traveler slams a hand forward and a curved dune crest rises out of the
+ * ground ahead of them and runs outward — not a projectile floating above the
+ * terrain, the ground itself moving. It ploughs a shallow channel and throws
+ * displaced mass to either side as it goes, exactly the shape SNOWFLOW's
+ * crescent of slush had; what changed is the cross-section reads as granular
+ * sand piling and cascading rather than a wave curling.
  *
- * It is the wake's cross-section on a different spine, and that is not a
- * shortcut. A carve's wall of snow and a bent wave of slush are the same
- * object — mass thrown out of the ground and held up by its own momentum — so
- * they are drawn by the same section integral out of `lib/wake.wgsl`, reached
- * through the water material's sheet profile. What differs is what the spine is:
- * the wake's is a record of where the board went, and this one is an arc that
+ * It is still the wake's cross-section on a different spine, and that is still
+ * not a shortcut. A carve's wall of thrown sand and a travelling dune crest are
+ * the same object — mass pushed out of the ground and held up by its own
+ * momentum — so they are drawn by the same section integral out of
+ * `lib/wake.wgsl`, reached through the shared sand-mass material's sheet
+ * profile (`waterBody.js`, `water.fragment.wgsl` — see those files' own notes
+ * on why the names did not change). What differs is what the spine is: the
+ * wake's is a record of where the board went, and this one is an arc that
  * grows outward from where the spell was cast.
  *
  * The channel is not a decal chased after the fact. Each frame the live crest
@@ -19,7 +26,8 @@
  */
 
 import { PROFILE_SHEET } from "./waterBody.js";
-import { clamp01, smooth01, bell } from "./bending.js";
+import { clamp01, clampRange, smooth01, bell } from "./bending.js";
+import { S } from "../core/settings.js";
 
 /** Spine samples across the crescent. */
 const COLS = 48;
@@ -110,10 +118,31 @@ export class Sweep {
             return;
         }
 
+        // Terrain response: sample the ground's slope directly under and just
+        // ahead of the crest, along the direction of travel. Not a physical
+        // coupling — the crest's shape is still the same analytic section
+        // integral it always was — but a cheap read of the one number that
+        // matters (is the ground rising or falling under the leading edge) is
+        // enough to make the wave visibly react to the dune field it is
+        // crossing, which is the believable illusion the phase asks for
+        // without a real granular simulation underneath it.
+        const cx0 = this.ox + this.dx * this.reach;
+        const cz0 = this.oz + this.dz * this.reach;
+        const hFwd = terrain.heightAt(cx0 + this.dx * 1.4, cz0 + this.dz * 1.4);
+        const hBack = terrain.heightAt(cx0 - this.dx * 1.4, cz0 - this.dz * 1.4);
+        // >0 climbing, <0 descending, clamped so a cliff cannot stall or launch it.
+        const slope = clampRange((hFwd - hBack) / 2.8, -0.5, 0.5);
+        const uphill = Math.max(0, slope);
+        const downhill = Math.max(0, -slope);
+
         // Speed decays: the wave is launched, not driven. Ten metres a second
         // down to a walking pace, which is what makes it read as something that
-        // was thrown rather than something being pushed.
-        const speed = 11.5 * Math.exp(-this.t * 1.15) + 1.2;
+        // was thrown rather than something being pushed. The slope then leans
+        // that decayed speed up or down: climbing a face costs it pace, running
+        // down one adds pace back — a real dune surge slumping downhill under
+        // its own weight, not just decaying with time.
+        const baseSpeed = 11.5 * Math.exp(-this.t * 1.15) + 1.2;
+        const speed = baseSpeed * (1 - uphill * 0.55 + downhill * 0.75);
         const travelled = speed * dt;
         this.reach += travelled;
 
@@ -124,10 +153,14 @@ export class Sweep {
         const env = rise * fall * fall;
 
         // A wave spreads as it runs: the arc opens up and the crest thins, so
-        // the same mass covers more ground.
-        const spread = clamp01((this.reach - 1.4) / 14);
-        const arc = ARC0 + (ARC1 - ARC0) * spread;
-        const height = PEAK * env / (1 + spread * 0.45);
+        // the same mass covers more ground. A downhill run spreads faster still
+        // — the same "more ground for the same mass" logic, pushed further by
+        // gravity doing some of the work — and an uphill climb piles the mass
+        // up instead of spreading it, which is where the extra crest height
+        // below comes from.
+        const spread = clamp01((this.reach - 1.4) / 14) * (1 + downhill * 0.5);
+        const arc = ARC0 + (ARC1 - ARC0) * Math.min(spread, 1);
+        const height = PEAK * S.duneSurgeHeightScale * env / (1 + spread * 0.45) * (1 + uphill * 0.6 - downhill * 0.15);
 
         // Circle centre, one curvature radius behind the leading point.
         const kx = this.ox + this.dx * (this.reach - CURVE);
@@ -177,17 +210,19 @@ export class Sweep {
             if (c === (COLS >> 1)) { px = x; py = y; pz = z; }
         }
 
-        // Slush: mostly water, with enough entrained snow to be opaque at the
-        // crest. Below about 0.4 it stops reading as slush and starts reading as
-        // a glass sculpture; above about 0.6 the water disappears entirely and
-        // it is just a snow berm that happens to be moving.
+        // Mid-compaction: loose enough to still be catching the sun as
+        // individual grains at the crest, not yet the dense packed mass a
+        // footpath or a Sand Lance groove leaves behind.
         water.setParams(s, PROFILE_SHEET, 0.48, clamp01(env * 1.4), COLS);
 
-        // Light rides the middle of the crest, low, so it grazes the channel it
-        // is cutting rather than lighting it from above.
+        // Almost no emission — see the phase's lighting-integration note: a
+        // travelling ridge of sand is not a light source, and a bright glow
+        // riding it would be the single fastest way to make it read as a
+        // magic effect rather than as displaced ground. What is left is barely
+        // a contact hint, not a glow.
         ctx.lights.add(
             px, py + height * 0.55, pz,
-            9.5, 0.42, 0.74, 1.0, 13.0 * env
+            6.0, 0.55, 0.46, 0.32, 1.6 * env
         );
 
         this._plough(travelled, env);
@@ -247,9 +282,9 @@ export class Sweep {
                 x, z,
                 0.34,
                 0.95 * k * env * w,   // channel
-                0.62 * k * env * w,   // berms at the rim
-                0.55 * k * env * w,   // slush packs what it runs over
-                0.16 * k * env * w,   // and refreezes a little of it
+                0.62 * k * env * w,   // displaced mass at the rim
+                0.55 * k * env * w,   // compacted by the mass running over it
+                0.16 * k * env * w,   // a little of the trench floor stabilises
                 yaw,
                 2.2,
                 0.9

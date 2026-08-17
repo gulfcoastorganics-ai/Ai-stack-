@@ -1,17 +1,23 @@
 /**
- * The ice formations Crystallise grows.
+ * The vitrified glass formations Fulgurite Garden grows.
  *
- * A fixed pool of prisms in one data-driven mesh: one draw, one 3 x 96 upload,
- * and no geometry generated at any point. A crystal that is not alive has zero
- * height, which collapses every one of its triangles onto its base point.
+ * SANDSTORM Phase 6: SNOWFLOW's ice-crystal pool, carried over in architecture
+ * exactly — one draw, one 3 x 96 upload, no geometry generated at any point, a
+ * formation that is not alive has zero height and collapses onto its base
+ * point. Only the shape function (`lib/crystal.wgsl`, irregular and kinked
+ * rather than a straight hexagonal prism) and the material
+ * (`crystal.fragment.wgsl`, amber glass rather than ice) changed; this file's
+ * job — pooling, ageing, growth, upload — needed none of that.
  *
  * Lifetime is deliberately long. This spell alters the surface semi-permanently
- * through the ice channel of the terrain state buffer, which decays on a
- * fifteen-minute constant, so a patch of glazed snow is still there long after
- * the geometry has gone. The prisms themselves sublimate over
- * about forty seconds, which is long enough that the player can walk around a
- * formation and look at it, and short enough that a session does not silently
- * fill up with ice.
+ * through the crust channel of the terrain state buffer, which decays on a
+ * fifteen-minute constant, so a patch of stabilised, glazed sand is still there
+ * long after the geometry has gone. The formations themselves sublimate — the
+ * same retreating-geometry animation SNOWFLOW used, since a fused-glass spire
+ * eroding back into the dune it grew from behaves the same way an ice prism
+ * eroding back into a drift did — over about forty seconds, long enough to
+ * walk around and look at one, short enough that a session does not silently
+ * fill up with glass.
  *
  * Allocation per frame: none.
  */
@@ -54,7 +60,7 @@ export class CrystalField {
         this.shadows = shadows;
         this.lights = lights;
 
-        // Rows: (x,y,z,height) / (axis,radius) / (growth, seed, tint, -)
+        // Rows: (x,y,z,height) / (axis,radius) / (growth, seed, tint, heat)
         this._texData = new Float32Array(CRYSTAL_MAX * 3 * 4);
         this.dataTex = RawTexture.CreateRGBATexture(
             this._texData, CRYSTAL_MAX, 3, scene,
@@ -79,8 +85,8 @@ export class CrystalField {
         this.material = this._makeMaterial();
         this.mesh.material = this.material;
         // Opaque, with the terrain. See the note at the top of the fragment
-        // shader: the refracted lookup already carries what is behind the ice, so
-        // blending buys nothing and costs correct depth.
+        // shader: the refracted lookup already carries what is behind the glass,
+        // so blending buys nothing and costs correct depth.
         this.mesh.renderingGroupId = 1;
         this.mesh.isVisible = false;
 
@@ -96,7 +102,7 @@ export class CrystalField {
 
     _makeMaterial() {
         const mat = new ShaderMaterial(
-            "iceCrystal", this.scene, { vertex: "crystal", fragment: "crystal" },
+            "fulguriteGlass", this.scene, { vertex: "crystal", fragment: "crystal" },
             {
                 attributes: ["position"],
                 uniforms: [
@@ -120,7 +126,7 @@ export class CrystalField {
         mat.backFaceCulling = false;
         // Blended *and* depth-writing. See the note at the top of
         // `crystal.fragment.wgsl`: this is what gives transparency against the
-        // snow without letting forty prisms blend over each other.
+        // sand without letting forty formations blend over each other.
         mat.alphaMode = Constants.ALPHA_COMBINE;
         mat.needAlphaBlending = () => true;
         mat.disableDepthWrite = false;
@@ -155,9 +161,9 @@ export class CrystalField {
      * The camera-space depth prepass material.
      *
      * This is the one caster that writes a non-zero specular mask, and the only
-     * reason the mask channel exists: ice is the sole mirror in a field of matte
-     * snow, so the reflection pass can early-out on it and cost nothing on every
-     * frame where nobody has cast Crystallise.
+     * reason the mask channel exists: fused glass is the sole mirror-bright
+     * surface in a field of matte sand, so the reflection pass can early-out on
+     * it and cost nothing on every frame where nobody has cast Fulgurite Garden.
      *
      * @param {import("../render/depthPass.js").DepthPass} depth
      */
@@ -256,6 +262,14 @@ export class CrystalField {
             }
 
             d[growRow + i * 4] = g;
+
+            // Formation heat: hot while still forming (rides the growth curve
+            // up, so the tip glows brightest right as it fuses into being),
+            // then a fast independent decay once fully grown — the "just got
+            // blasted into existence" flash `crystal.fragment.wgsl` reads as
+            // `vHeat`. Row 2's fourth channel, unused by SNOWFLOW's ice.
+            const heat = a < this.grow[i] ? g : Math.max(0, 1 - (a - this.grow[i]) / 0.55);
+            d[growRow + i * 4 + 3] = heat;
             live++;
         }
 
@@ -378,7 +392,7 @@ function buildMesh(scene) {
         }
     }
 
-    const mesh = new Mesh("iceCrystals", scene);
+    const mesh = new Mesh("fulguriteGlass", scene);
     const vd = new VertexData();
     vd.positions = pos;
     vd.indices = idx;
