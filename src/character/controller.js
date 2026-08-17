@@ -46,18 +46,18 @@ const _fwd = new Vector3();
 const _right = new Vector3();
 const _n = new Vector3();
 
-// ------------------------------------------------------------- speed tiers
+// -------------------------------------------------------------- ground speed
 //
-// RUN is the default un-shifted speed — "default exploration movement" per
-// the phase brief. WALK, the precision tier, has no bound key yet: nothing
-// in this phase's input list (WASD/Shift/mouse/wheel/RMB/1-5/Space/Q/Ctrl/C)
-// allocates one, and keyboard WASD has no partial-deflection analogue of a
-// gamepad stick to drive it from. The tier stays a documented gap rather
-// than a key grabbed for the sake of having three: a future analog input
-// source can read `moveRunSpeed`'s sibling here without this file changing.
+// Control-revision pass: there is one ground-movement target now, not a
+// Shift-gated tier. WASD/arrows always drive full-speed camera-relative
+// traversal — "the player does not explicitly toggle WALK versus RUN versus
+// SPRINT" — and Shift is a discrete jump/Sand Step button instead (see
+// `_tryJump`). A slower presentation at low input/velocity still exists —
+// see `figure.js`'s idle→light-run→sprint pose blend — but it is read off
+// actual speed, not chosen by the player through a modifier key.
 //
-// RUN/SPRINT/ground-accel/turn-rate are all live-tunable — see `settings.js`'s
-// `moveRunSpeed`/`moveSprintSpeed`/`moveGroundAccel`/`moveTurnRate` and the
+// `moveRunSpeed`/ground-accel/turn-rate are all live-tunable — see
+// `settings.js`'s `moveRunSpeed`/`moveGroundAccel`/`moveTurnRate` and the
 // "Locomotion" debug group.
 
 const SURF_MAX = 19.5;
@@ -284,7 +284,7 @@ export class CharacterController {
      * reversal turns hard rather than drifting at a walk's rate.
      */
     _walkStep(h) {
-        const maxSpeed = input.sprint ? S.moveSprintSpeed : S.moveRunSpeed;
+        const maxSpeed = S.moveRunSpeed;
 
         _wish.set(
             _fwd.x * input.moveZ + _right.x * input.moveX,
@@ -361,7 +361,7 @@ export class CharacterController {
         );
         const wishLen = Math.hypot(_wish.x, _wish.z);
         if (wishLen > 0.001) {
-            const speed = S.moveSprintSpeed;
+            const speed = S.moveRunSpeed;
             _wish.x = (_wish.x / wishLen) * speed;
             _wish.z = (_wish.z / wishLen) * speed;
 
@@ -510,8 +510,8 @@ export class CharacterController {
     }
 
     /**
-     * A favourable-crest launch bonus: sprinting, and the ground drops away
-     * ahead along the current facing. Two `heightAt` point samples — no
+     * A favourable-crest launch bonus: running at speed, and the ground drops
+     * away ahead along the current facing. Two `heightAt` point samples — no
      * scanning, no new terrain query.
      */
     _crestBoost() {
@@ -520,7 +520,10 @@ export class CharacterController {
         const nearY = this.terrain.heightAt(this.position.x + fx * 4, this.position.z + fz * 4);
         const farY = this.terrain.heightAt(this.position.x + fx * 8, this.position.z + fz * 8);
         if (nearY < this.groundY - 0.3 && farY < nearY - 0.3) {
-            return 1.22 + 0.10 * Math.min(1, (this.speed - S.moveRunSpeed) / S.moveSprintSpeed);
+            // Headroom above the run target, e.g. from dash/surf carrying
+            // into a crest — scaled against a fixed span, not a removed
+            // sprint tier.
+            return 1.22 + 0.10 * Math.min(1, (this.speed - S.moveRunSpeed) / 4.0);
         }
         return 1;
     }
@@ -657,7 +660,7 @@ export class CharacterController {
         // while airborne, dashing or evading — none of those are a walk cycle.
         this.stepping =
             this.grounded && this.surf <= 0.5 && !this.dashing && !this.evading &&
-            this.speed <= S.moveSprintSpeed * 1.2;
+            this.speed <= S.moveRunSpeed * 1.8;
         if (!this.stepping) {
             this.gaitPhase = 0;
             return;

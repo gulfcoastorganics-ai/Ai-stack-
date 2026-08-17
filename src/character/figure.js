@@ -83,15 +83,15 @@ const FORE_LEN = 0.26;
 const HIP_HEIGHT = 0.95;
 
 /**
- * Speed the pose blends normalise "how much run" against, 0..1. Phase 7
- * raised the controller's actual speed tiers (`settings.js`'s
- * `moveRunSpeed`/`moveSprintSpeed`, ~6.5/10 m/s by default) well past
+ * Speed the pose blends normalise "how much run" against, 0..1. The
+ * control-revision pass collapsed the controller down to one ground-speed
+ * target (`settings.js`'s `moveRunSpeed`, ~7.2 m/s by default), well past
  * SNOWFLOW's single 5.4 m/s reference, so a pose blend still keyed to 5.4
- * would sit fully saturated the moment the character left a walk — leaving
- * sprint with no extra visual intensity over a run. Not read from
- * `settings.js` directly: this is a fixed normalisation range for how the
- * *pose* grades in, not a live gameplay tunable, and the two are allowed to
- * drift apart.
+ * would sit fully saturated the moment the character started moving —
+ * leaving no extra visual intensity as dash/surf push speed higher. Not read
+ * from `settings.js` directly: this is a fixed normalisation range for how
+ * the *pose* grades in, not a live gameplay tunable, and the two are allowed
+ * to drift apart.
  */
 const RUN_NORM = 9.0;
 

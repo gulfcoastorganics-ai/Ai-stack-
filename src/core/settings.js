@@ -145,13 +145,15 @@ export const S = {
     heatShimmerStrength: 0.35,
 
     // -------------------------------------------------------- locomotion
-    // Phase 7. Live-tunable rather than baked constants in `controller.js`/
-    // `camera.js`, per the phase's debug-tuning requirement — a deliberately
-    // small subset (run/sprint speed, ground response, turn response, jump
-    // impulse, air control, dash speed/duration, camera follow, mouse
-    // sensitivity), not every internal constant those files define.
-    moveRunSpeed: 6.5, // m/s, default un-shifted ground speed
-    moveSprintSpeed: 10.0, // m/s, Shift held
+    // Phase 7, revised by the control-revision pass that removed Shift as a
+    // sprint modifier: there is one ground-speed target now, not two tiers
+    // gated behind a held key. Live-tunable rather than baked constants in
+    // `controller.js`/`camera.js`, per the phase's debug-tuning requirement —
+    // a deliberately small subset (move speed, ground response, turn
+    // response, jump impulse, air control, dash speed/duration, camera
+    // follow, mouse sensitivity), not every internal constant those files
+    // define.
+    moveRunSpeed: 7.2, // m/s — the one ground-movement target, always live
     moveGroundAccel: 70, // m/s^2, ground acceleration/deceleration response
     moveTurnRate: 16, // 1/s, facing-ease rate at zero speed (scales up with speed)
     moveJumpImpulse: 7.6, // m/s, initial vertical speed on jump
@@ -237,8 +239,7 @@ export const SCHEMA = [
     {
         group: "Locomotion",
         items: [
-            { k: "moveRunSpeed", l: "Run speed", t: "f", min: 2, max: 12, step: 0.1 },
-            { k: "moveSprintSpeed", l: "Sprint speed", t: "f", min: 4, max: 16, step: 0.1 },
+            { k: "moveRunSpeed", l: "Move speed", t: "f", min: 2, max: 14, step: 0.1 },
             { k: "moveGroundAccel", l: "Ground response", t: "f", min: 20, max: 140, step: 1 },
             { k: "moveTurnRate", l: "Turn response", t: "f", min: 4, max: 32, step: 0.5 },
             { k: "moveJumpImpulse", l: "Jump impulse", t: "f", min: 3, max: 14, step: 0.1 },

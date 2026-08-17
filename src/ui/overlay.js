@@ -10,7 +10,6 @@
 
 import { S, SCHEMA, set, applyPreset } from "../core/settings.js";
 import { stats, systemMs, FrameGraph, spikes, resetSpikes } from "../core/perf.js";
-import { input } from "../core/input.js";
 
 const CSS = `
 #ov {
@@ -462,8 +461,7 @@ export class Overlay {
 
         this._txt(r.locoState, c.state + (c.grounded ? " / grounded" : " / air " + c.airTime.toFixed(2) + "s"));
         this._txt(r.locoSpeed, c.speed.toFixed(2) + " m/s  " + c.verticalVelocity.toFixed(2) + " m/s");
-        const desired = input.sprint ? S.moveSprintSpeed : S.moveRunSpeed;
-        this._txt(r.locoDesired, desired.toFixed(1) + " m/s");
+        this._txt(r.locoDesired, S.moveRunSpeed.toFixed(1) + " m/s");
         this._txt(
             r.locoYaw,
             wrapDeg(c.facing * RAD).toFixed(0) + "°  " + (rig ? wrapDeg(rig.yaw * RAD).toFixed(0) + "°" : "—")

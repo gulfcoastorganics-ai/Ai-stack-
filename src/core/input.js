@@ -21,7 +21,6 @@ export const input = {
     zoomDelta: 0,
 
     surf: false, // RMB (or F) held
-    sprint: false, // shift
 
     /** @type {number} 0 = none, else 1..5 — set on keydown, cleared each frame */
     spellPressed: 0,
@@ -29,12 +28,23 @@ export const input = {
     spellHeld2: false,
 
     // ---------------------------------------------------- Phase 7 traversal
-    // All four are edge-triggered — true for exactly one `pollInput` cycle —
-    // same pattern as `spellPressed`, so the controller sees a press once
-    // regardless of how long the key stays down and never has to de-bounce a
-    // held key itself.
-    /** @type {boolean} Space — jump, or a Sand Step if already airborne. */
+    // Three of these are edge-triggered — true for exactly one `pollInput`
+    // cycle — same pattern as `spellPressed`, so the controller sees a press
+    // once regardless of how long the key stays down and never has to
+    // de-bounce a held key itself.
+    /**
+     * Shift — jump while grounded (or within coyote time), or a Sand Step if
+     * already airborne. Edge-triggered on purpose: Shift is a discrete
+     * action button now, not a held movement modifier, and a controller that
+     * read `jumpHeld` for this would jump every single frame the key stayed
+     * down. See `jumpHeld` below for the (rarely needed) continuous state.
+     */
     jumpPressed: false,
+    /** @type {boolean} Shift currently held — continuous state, for anything
+     *  that genuinely needs "is the button down" rather than "was it just
+     *  pressed". The controller's own jump/Sand Step logic uses
+     *  `jumpPressed`, not this. */
+    jumpHeld: false,
     /** @type {boolean} Q — dash, or an air dash if airborne. */
     dashPressed: false,
     /** @type {boolean} Ctrl — evade. */
@@ -82,6 +92,7 @@ export function initInput(canvas, hooks) {
             _fToggle = false;
             input.surf = false;
             input.spellHeld2 = false;
+            input.jumpHeld = false;
         }
     });
 
@@ -124,9 +135,21 @@ export function initInput(canvas, hooks) {
             onToggleOverlay?.();
             return;
         }
-        // Space defaults to scrolling the page / re-clicking the last focused
-        // button; neither is wanted once the canvas owns input.
-        if (e.code === "Space" && input.locked) e.preventDefault();
+
+        const isShift = e.code === "ShiftLeft" || e.code === "ShiftRight";
+        // Shift is a discrete action button now (jump / Sand Step), not a
+        // held movement modifier — `jumpPressed` fires once per physical
+        // press regardless of how long the key stays down afterward, the
+        // same edge-triggered shape as the spell keys below. `jumpHeld`
+        // tracks the continuous state alongside it for anything that
+        // genuinely wants "is it down", but the controller's own jump logic
+        // deliberately does not read it — see the field's own doc comment on
+        // why a naive `if (shiftHeld) jump()` would fire every frame.
+        if (isShift) {
+            if (!e.repeat && input.locked) input.jumpPressed = true;
+            input.jumpHeld = true;
+        }
+
         if (e.repeat) return;
         keys[e.code] = true;
 
@@ -137,8 +160,7 @@ export function initInput(canvas, hooks) {
         }
 
         if (!input.locked) return;
-        if (e.code === "Space") input.jumpPressed = true;
-        else if (e.code === "KeyQ") input.dashPressed = true;
+        if (e.code === "KeyQ") input.dashPressed = true;
         else if (e.code === "ControlLeft" || e.code === "ControlRight") input.evadePressed = true;
         else if (e.code === "KeyC") input.camResetPressed = true;
         // Alternate surf toggle — see the note on `input.surf` above.
@@ -148,6 +170,11 @@ export function initInput(canvas, hooks) {
     window.addEventListener("keyup", (e) => {
         keys[e.code] = false;
         if (SPELL_KEYS[e.code] === 2) input.spellHeld2 = false;
+        if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+            // Only clear once *both* physical Shift keys are up, so tapping
+            // one while still holding the other does not read as released.
+            input.jumpHeld = !!(keys.ShiftLeft || keys.ShiftRight);
+        }
     });
 
     window.addEventListener("blur", () => {
@@ -156,6 +183,7 @@ export function initInput(canvas, hooks) {
         _fToggle = false;
         input.surf = false;
         input.spellHeld2 = false;
+        input.jumpHeld = false;
     });
 }
 
@@ -185,7 +213,6 @@ export function pollInput() {
     input.moveX = x;
     input.moveZ = z;
     input.moving = len > 0.001;
-    input.sprint = !!(keys.ShiftLeft || keys.ShiftRight);
 }
 
 /** Clear per-frame accumulators. Called at the very end of the frame. */
