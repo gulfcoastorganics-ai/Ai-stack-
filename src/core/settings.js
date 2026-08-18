@@ -212,6 +212,14 @@ export const S = {
      * glTF fails to load, so a broken/missing asset never blanks the screen.
      */
     characterModel: "ranger", // "ranger" | "procedural"
+    /**
+     * Temporary orientation debug knob for the Ranger adapter (degrees,
+     * added to its baked yaw offset in `rangerCharacter.js`). Exists only
+     * to let a human dial in the correct forward axis in a real browser;
+     * once confirmed, the found value gets baked into the adapter's
+     * default and this setting goes away.
+     */
+    rangerYawDebug: 0,
     showWake: true,
     showLightShafts: true,
     wireframe: false,
@@ -343,6 +351,7 @@ export const SCHEMA = [
             { k: "showTerrain", l: "Terrain", t: "b" },
             { k: "showCharacter", l: "Character", t: "b" },
             { k: "characterModel", l: "Character model", t: "e", opts: ["ranger", "procedural"] },
+            { k: "rangerYawDebug", l: "Ranger yaw debug", t: "f", min: -180, max: 180, step: 1 },
             { k: "wireframe", l: "Wireframe", t: "b" },
             { k: "freezeTime", l: "Freeze time", t: "b" },
             { k: "resolutionScale", l: "Resolution", t: "f", min: 0.4, max: 1.25, step: 0.05 },

@@ -3,35 +3,38 @@
  * character to the procedural `Character` (see `character.js`), not a
  * replacement of it. `CharacterController` stays the single source of
  * gameplay motion; this class only ever *reads* its position/facing and
- * writes them onto a transform node. It never drives movement, never owns
- * physics, and never touches the terrain/deformation/contact systems —
- * those already work off `CharacterController` and the procedural figure's
- * own foot-IK solve (see `snowContact.js`), which keeps running underneath
- * regardless of which model is on screen, so footprints/dash streaks/
- * landing compression are unaffected by this file existing at all.
+ * writes them onto a transform node each frame (`sync()`). It never drives
+ * movement, never owns physics, and never touches the terrain/deformation/
+ * contact systems — those already work off `CharacterController` and the
+ * procedural figure's own foot-IK solve (see `snowContact.js`), which keeps
+ * running underneath regardless of which model is on screen.
  *
- * Architectural note this file does NOT attempt to paper over: the rest of
- * SANDSTORM's characters and terrain are lit by a fully bespoke pipeline —
- * hand-rolled cascaded shadow maps with a custom prepass material per
- * caster (see `render/shadows.js`'s own header on why: nothing in this
- * scene has CPU geometry a generic depth pass could render), spherical-
- * harmonic sky ambient, and a hand-written WGSL BRDF reading `sunDir`/
- * `sunRadiance` uniforms directly. A glTF-loaded mesh arrives with
- * Babylon's own skeleton/bone system and standard `PBRMaterial` instances,
- * which know nothing about any of that custom machinery. Bridging the two
- * *exactly* — a custom WGSL replacement shader for the Ranger's materials
- * that samples the same cascades and SH data the rest of the scene does —
- * is real, substantial follow-up work, explicitly out of scope for this
- * milestone. What this file does instead: a `DirectionalLight` synced every
- * frame to the scene's actual sun direction/color, a `HemisphericLight` for
- * sky/ground bounce fill, and a Babylon `ShadowGenerator` off that
- * directional light for the Ranger to self-shadow. The Ranger will be lit
- * from the correct direction with the correct color and will self-shadow
- * (hood onto shoulders, etc.); it will NOT appear in the terrain's own
- * shadow cascades (no Ranger-shaped shadow on the sand yet) and the terrain
- * will not cast into the Ranger's shadow map either — see the class doc for
- * why that isn't a quick fix. Flagged clearly in the integration report,
- * not silently left out.
+ * Lighting/shadow integration, second pass: the first version of this file
+ * used Babylon's own `PBRMaterial` (from the glTF loader) plus a parallel
+ * `DirectionalLight`/`HemisphericLight`/`ShadowGenerator` rig — a real
+ * approximation of the scene's actual lighting, not the thing itself. This
+ * version replaces that with `rangerChar.vertex/fragment.wgsl`: a custom
+ * shader built from the SAME shared lighting library every other material
+ * in the scene uses (`snowShading`/`snowShadowLookup`/`snowAtmosphere` —
+ * see those files) — the same sun radiance, the same SH sky ambient, the
+ * same cascade shadow lookup, the same aerial perspective, sampling the
+ * glTF's own baseColor/normal/ORM textures through a standard metallic-
+ * roughness BRDF instead of the ground/cloth's bespoke terms. The Ranger is
+ * registered as a caster into the *actual* cascade shadow system
+ * (`ShadowSystem.registerCaster`, `rangerDepth.vertex.wgsl`) and the scene
+ * depth prepass (`DepthPass.registerCaster`, `rangerPrepass.vertex.wgsl`),
+ * the same two registrations the procedural character makes — so it now
+ * casts a real shadow onto the sand from the same cascades the terrain
+ * reads, not a separate self-shadow-only rig.
+ *
+ * What is still an honest gap, not silently smoothed over: the Ranger's
+ * geometry is rigid (`world`-transformed only, no bone skinning) because it
+ * carries 0 animation clips right now and sits permanently in its bind
+ * pose — see the audit note in `load()`. That is *correct* for the
+ * character's current state, not a shortcut around it, but it means the
+ * shadow/depth casters below will need real skinning support the moment
+ * animation retargeting lands, or the cast shadow will stop matching a
+ * posed mesh. Flagged here so that follow-up doesn't get missed.
  */
 
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
@@ -39,11 +42,13 @@ import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 // in this module calls anything exported from it directly.
 import "@babylonjs/loaders/glTF/2.0";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
-import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
+import { Vector3, Vector4 } from "@babylonjs/core/Maths/math.vector";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
+import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
+import { S } from "../core/settings.js";
+import { whenReady, bindMatrixArray } from "../core/gpuUtil.js";
+import { CASCADE_COUNT } from "../render/shadows.js";
 
 const ASSET_ROOT = "/assets/character/quaternius/ranger/";
 const ASSET_FILE = "Male_Ranger.gltf";
@@ -52,8 +57,7 @@ const ASSET_FILE = "Male_Ranger.gltf";
  * Standing height the glTF is actually authored at, metres — measured
  * directly from the union of every mesh's own POSITION accessor bounds
  * (feet at y ≈ -0.004, the hood's own top at y ≈ 1.865), not assumed from
- * any README or product metadata. See the integration report for the exact
- * per-mesh figures this was read from.
+ * any README or product metadata.
  */
 const RANGER_SOURCE_HEIGHT = 1.869;
 /** The procedural traveler's own height — figure.js's `HIP_HEIGHT` note
@@ -63,40 +67,54 @@ const TARGET_HEIGHT = 1.79;
 const RANGER_SCALE = TARGET_HEIGHT / RANGER_SOURCE_HEIGHT;
 
 /**
- * Yaw applied on top of `CharacterController.facing` to align the Ranger's
- * own local forward with SANDSTORM's convention (+Z at yaw 0 — see
- * `figure.js`'s `composeBasis`). The glTF's `asset.generator` reads
- * "Khronos glTF Blender I/O", whose standard axis conversion puts a
- * Blender-authored character's forward on local -Z after export — hence PI
- * here. This is inferred from the export tool's documented convention, not
- * visually confirmed: flagged explicitly in the integration report as one
- * of the checks a real WebGPU browser still needs to make. If the Ranger
- * ends up facing backward, flip this to 0.
+ * Baked default yaw applied on top of `CharacterController.facing` to align
+ * the Ranger's own local forward with SANDSTORM's convention (+Z at yaw 0 —
+ * see `figure.js`'s `composeBasis`). Inferred from the glTF's
+ * `asset.generator` ("Khronos glTF Blender I/O") and that tool's documented
+ * Blender→glTF forward-axis convention, still not visually confirmed as of
+ * this pass. `S.rangerYawDebug` (settings.js, a live-tunable degrees offset
+ * defaulting to 0) sits on top of this for exactly that reason — dial it in
+ * a real browser, then report the total corrected angle back so it can be
+ * folded into this constant and the debug control removed.
  */
 const YAW_OFFSET = Math.PI;
+
+// ------------------------------------------------------- module-scope scratch
+const _splits = new Vector4();
 
 export class RangerCharacter {
     /**
      * @param {import("@babylonjs/core/scene").Scene} scene
+     * @param {import("../render/sky.js").Sky} sky
+     * @param {import("../render/shadows.js").ShadowSystem} shadows
+     * @param {import("../render/depthPass.js").DepthPass} depthPass
      */
-    constructor(scene) {
+    constructor(scene, sky, shadows, depthPass) {
         this.scene = scene;
+        this.sky = sky;
+        this.shadows = shadows;
+        this.depthPass = depthPass;
+
         this.root = null;
         /** @type {import("@babylonjs/core/Meshes/abstractMesh").AbstractMesh[]} */
         this.meshes = [];
         this.loaded = false;
         this.failed = false;
 
-        this._light = null;
-        this._ambient = null;
-        this._shadowGen = null;
+        /** Beauty materials — exactly 2, gear and skin (see the class doc). */
+        this._materials = [];
+        this._depthMats = [];
+        this._prepassMats = [];
+        this._textures = [];
+
+        this._cameraPos = new Vector3();
     }
 
     /**
-     * Load the glTF and stand up its lighting/shadow rig. Never throws —
-     * failure is reported through the return value (and `this.failed`) so
-     * `main.js` can fall back to the procedural character without the boot
-     * sequence crashing on a missing or malformed asset.
+     * Load the glTF and stand up its shaders/shadow/prepass registration.
+     * Never throws — failure is reported through the return value (and
+     * `this.failed`) so `main.js` can fall back to the procedural character
+     * without the boot sequence crashing on a missing or malformed asset.
      * @returns {Promise<boolean>} true if the Ranger is ready to render.
      */
     async load() {
@@ -111,24 +129,54 @@ export class RangerCharacter {
             this.root.scaling.setAll(RANGER_SCALE);
 
             // Parent whatever Babylon created at the top of the import under
-            // our own controller-driven root, rather than reparenting every
-            // mesh individually — the glTF's single scene root (the
-            // "Armature" node, confirmed from the file's own `scenes[0].nodes`)
-            // carries the whole skeleton/mesh hierarchy as one rigid unit, and
-            // reparenting it once is what keeps that hierarchy intact. Handles
-            // both single- and multi-root imports the same way: anything with
-            // no parent of its own becomes a child of `this.root`.
+            // our own controller-driven root. Handles both single- and
+            // multi-root imports the same way: anything with no parent of
+            // its own becomes a child of `this.root`. The glTF's single
+            // scene root (the "Armature" node, confirmed from the file's
+            // own `scenes[0].nodes`) carries the whole mesh hierarchy as one
+            // rigid unit — see the class doc on why "rigid" is currently
+            // correct rather than a shortcut.
             const topLevel = new Set();
             for (const node of [...result.meshes, ...(result.transformNodes || [])]) {
                 if (!node.parent) topLevel.add(node);
             }
             for (const node of topLevel) node.parent = this.root;
 
-            for (const m of renderable) m.receiveShadows = true;
+            const gearTex = this._loadTextureSet(
+                "T_Ranger_BaseColor.png", "T_Ranger_Normal.png", "T_Ranger_ORM.png"
+            );
+            const skinTex = this._loadTextureSet(
+                "T_Regular_Male_Dark_BaseColor.png", "T_Regular_Male_Normal.png",
+                "T_Regular_Male_Roughness.png"
+            );
+            // MI_Ranger's ORM texture is a real packed (AO, roughness,
+            // metalness) map; MI_Regular_Male's is roughness-only — see the
+            // fragment shader's own note on why `hasORM` gates two of its
+            // three channels off for the latter.
+            const gearMat = this._makeSurfaceMaterial("rangerGear", gearTex, true);
+            const skinMat = this._makeSurfaceMaterial("rangerSkin", skinTex, false);
+            this._materials = [gearMat, skinMat];
+
+            // Replace each mesh's glTF-loader-created PBRMaterial with the
+            // matching custom shader above, keyed off the glTF's own
+            // material name (confirmed from the raw file: `MI_Ranger` for
+            // gear, `MI_Regular_Male` for skin/underlayer — see the audit
+            // in this pass's PR report). The loader's PBRMaterial and its
+            // own texture instances are disposed here rather than reused:
+            // this shader loads the same six PNGs directly by their known
+            // asset paths instead, which is simpler and more predictable
+            // than depending on Babylon-version-specific internal texture-
+            // slot property names.
+            for (const m of renderable) {
+                const isGear = m.material ? m.material.name === "MI_Ranger" : true;
+                if (m.material) m.material.dispose(true, true);
+                m.material = isGear ? gearMat : skinMat;
+                m.receiveShadows = true;
+            }
             this.meshes = renderable;
 
-            this._setupLighting();
-            this._setupShadows();
+            this._registerShadowCasters();
+            this._registerPrepass();
 
             this.loaded = true;
         } catch (err) {
@@ -141,68 +189,157 @@ export class RangerCharacter {
         return this.loaded;
     }
 
-    /**
-     * A directional light for the sun and a hemispheric light for sky/sand
-     * bounce fill, both scoped to the Ranger's own meshes via
-     * `includedOnlyMeshes` so they never touch the custom-shaded terrain,
-     * procedural traveler, wake, or particles — those already compute their
-     * own lighting analytically and have no use for a generic scene light
-     * landing on them too.
-     */
-    _setupLighting() {
-        this._light = new DirectionalLight("rangerSun", new Vector3(0, -1, 0), this.scene);
-        this._light.diffuse = new Color3(1, 1, 1);
-        this._light.specular = new Color3(1, 1, 1);
-        this._light.includedOnlyMeshes = this.meshes;
-
-        // Cool sky above, warm sand bounce below — the same split every other
-        // material in this scene is built around, approximated here with two
-        // flat colours rather than the full SH data the custom shaders read
-        // (`HemisphericLight` only has room for two). Scaled by the same
-        // `ambientIntensity` slider everything else answers to.
-        this._ambient = new HemisphericLight("rangerAmbient", new Vector3(0, 1, 0), this.scene);
-        this._ambient.diffuse = new Color3(0.58, 0.64, 0.72);
-        this._ambient.groundColor = new Color3(0.42, 0.32, 0.20);
-        this._ambient.specular = new Color3(0, 0, 0);
-        this._ambient.includedOnlyMeshes = this.meshes;
-    }
-
-    /** Self-shadowing only — see the class doc for why the terrain and the
-     *  Ranger can't cast into each other's shadow system yet. */
-    _setupShadows() {
-        this._shadowGen = new ShadowGenerator(1024, this._light);
-        this._shadowGen.useContactHardeningShadow = true;
-        for (const m of this.meshes) this._shadowGen.addShadowCaster(m, false);
+    _loadTextureSet(baseColor, normal, orm) {
+        const mk = (file) => {
+            const t = new Texture(
+                ASSET_ROOT + file, this.scene, false, false
+            );
+            this._textures.push(t);
+            return t;
+        };
+        return { baseColor: mk(baseColor), normal: mk(normal), orm: mk(orm) };
     }
 
     /**
-     * Sync light direction/color to the scene's actual sun.
-     * @param {import("../render/sky.js").Sky} sky
-     * @param {number} ambientIntensity
+     * One beauty material — see `rangerChar.fragment.wgsl` for the shared
+     * lighting math. `hasORM` distinguishes the gear material's real packed
+     * AO/metalness from the skin material's roughness-only texture.
      */
-    updateLighting(sky, ambientIntensity) {
+    _makeSurfaceMaterial(name, tex, hasORM) {
+        const mat = new ShaderMaterial(
+            name, this.scene, { vertex: "rangerChar", fragment: "rangerChar" },
+            {
+                attributes: ["position", "normal", "uv"],
+                uniforms: [
+                    "world", "viewProjection", "cameraPos",
+                    "sunDir", "sunRadiance", "shR",
+                    "cascadeMatrices", "cascadeSplits", "cascadeParams",
+                    "shadowTexel", "shadowSoftness", "shadowBias",
+                    "fogDensity", "fogHeightFalloff", "fogStart", "aerialStrength",
+                    "ambientIntensity", "hasORM",
+                ],
+                samplers: [
+                    "baseColorTex", "normalTex", "ormTex",
+                    "skyLUT", "cascade0", "cascade1", "cascade2",
+                ],
+                shaderLanguage: ShaderLanguage.WGSL,
+            }
+        );
+        mat.backFaceCulling = true;
+        mat.setTexture("baseColorTex", tex.baseColor);
+        mat.setTexture("normalTex", tex.normal);
+        mat.setTexture("ormTex", tex.orm);
+        mat.setFloat("hasORM", hasORM ? 1 : 0);
+        mat.setTexture("skyLUT", this.sky.lut);
+        for (let i = 0; i < CASCADE_COUNT; i++) {
+            mat.setTexture("cascade" + i, this.shadows.maps[i]);
+        }
+        return mat;
+    }
+
+    /** Register every mesh as a cascade shadow caster — the real terrain
+     *  shadow system, not a separate self-shadow-only rig. */
+    _registerShadowCasters() {
+        for (const m of this.meshes) {
+            this.shadows.registerCaster(
+                m, (cascade) => this._makeDepthMaterial(m.name + "_depth" + cascade), CASCADE_COUNT
+            );
+        }
+    }
+
+    _makeDepthMaterial(name) {
+        const mat = new ShaderMaterial(
+            name, this.scene, { vertex: "rangerDepth", fragment: "terrainDepth" },
+            {
+                attributes: ["position"],
+                uniforms: ["world", "lightViewProjection"],
+                shaderLanguage: ShaderLanguage.WGSL,
+            }
+        );
+        mat.backFaceCulling = true;
+        this._depthMats.push(mat);
+        return mat;
+    }
+
+    /** Register every mesh into the scene's own camera-space depth prepass,
+     *  so post effects (TAA/DOF/SSR) see the Ranger like any other caster. */
+    _registerPrepass() {
+        for (const m of this.meshes) {
+            const mat = new ShaderMaterial(
+                m.name + "_prepass", this.scene,
+                { vertex: "rangerPrepass", fragment: "prepass" },
+                {
+                    attributes: ["position"],
+                    uniforms: ["world", "viewProjection"],
+                    shaderLanguage: ShaderLanguage.WGSL,
+                }
+            );
+            mat.backFaceCulling = true;
+            this._prepassMats.push(mat);
+            this.depthPass.registerCaster(m, mat);
+        }
+    }
+
+    /** Compile every registered pipeline behind the loading screen. */
+    async warmUp() {
         if (!this.loaded) return;
-        this._light.direction.set(-sky.sunDir.x, -sky.sunDir.y, -sky.sunDir.z);
-        this._light.diffuse.copyFrom(sky.sunColor);
-        // `sky.sunScale` is calibrated for the scene's own radiometric
-        // shader units, not Babylon's default light-intensity scale — this
-        // factor is an untested starting point (documented as such in the
-        // class doc), not a calibrated photometric match.
-        this._light.intensity = Math.min(4, sky.sunScale * 0.6);
-        this._ambient.intensity = 0.5 * ambientIntensity;
+        for (const m of this._materials) {
+            await whenReady(m, m.name, [this.meshes[0], false]);
+        }
+        for (let i = 0; i < this._depthMats.length; i++) {
+            const mesh = this.meshes[Math.floor(i / CASCADE_COUNT)];
+            await whenReady(this._depthMats[i], this._depthMats[i].name, [mesh, false]);
+        }
+        for (let i = 0; i < this._prepassMats.length; i++) {
+            await whenReady(this._prepassMats[i], this._prepassMats[i].name, [this.meshes[i], false]);
+        }
     }
 
     /**
-     * Follow `CharacterController`'s position/facing. Called every frame
-     * regardless of whether the Ranger is the visible model — cheap, and it
-     * means flipping `characterModel` never shows a stale pose.
+     * Follow `CharacterController`'s position/facing and push this frame's
+     * lighting/shadow uniforms. Called every frame regardless of whether
+     * the Ranger is the visible model — cheap, and it means flipping
+     * `characterModel` never shows a stale pose or stale lighting.
      * @param {import("@babylonjs/core/Maths/math.vector").Vector3} position
      * @param {number} facing
+     * @param {import("@babylonjs/core/Maths/math.vector").Vector3} cameraPos
      */
-    sync(position, facing) {
+    sync(position, facing, cameraPos) {
         if (!this.loaded) return;
+
         this.root.position.set(position.x, position.y, position.z);
-        this.root.rotation.y = facing + YAW_OFFSET;
+        // `S.rangerYawDebug` is degrees, live-tunable — see the class doc
+        // and settings.js for why this exists on top of the baked default.
+        this.root.rotation.y = facing + YAW_OFFSET + (S.rangerYawDebug * Math.PI) / 180;
+
+        this._cameraPos.copyFrom(cameraPos);
+        const sky = this.sky;
+        const sh = this.shadows;
+        _splits.set(sh.splits[0], sh.splits[1], sh.splits[2], sh.splits[3]);
+
+        for (const m of this._materials) {
+            m.setVector3("cameraPos", this._cameraPos);
+            m.setVector3("sunDir", sky.sunDir);
+            m.setColor3("sunRadiance", sky.sunRadiance);
+            m.setArray4("shR", sky.sh);
+
+            bindMatrixArray(m, "cascadeMatrices", sh.matrixData);
+            m.setVector4("cascadeSplits", _splits);
+            m.setArray4("cascadeParams", sh.paramData);
+            m.setFloat("shadowTexel", sh.texelSize);
+            // Same values character.js's own materials use — see that
+            // file's note on why the bias stays tight: a large one detaches
+            // the contact shadow between the boots and the sand, which is
+            // the one shadow that reads as "standing on the ground".
+            m.setFloat("shadowSoftness", 1.4);
+            m.setFloat("shadowBias", 0.012);
+
+            m.setFloat("fogDensity", S.fogDensity);
+            m.setFloat("fogHeightFalloff", S.fogHeightFalloff);
+            m.setFloat("fogStart", S.fogStart);
+            m.setFloat("aerialStrength", S.aerialStrength);
+            m.setFloat("ambientIntensity", S.ambientIntensity);
+        }
     }
 
     setVisible(visible) {
@@ -212,9 +349,14 @@ export class RangerCharacter {
     dispose() {
         for (const m of this.meshes) m.dispose();
         this.meshes = [];
+        for (const m of this._materials) m.dispose();
+        for (const m of this._depthMats) m.dispose();
+        for (const m of this._prepassMats) m.dispose();
+        for (const t of this._textures) t.dispose();
+        this._materials = [];
+        this._depthMats = [];
+        this._prepassMats = [];
+        this._textures = [];
         if (this.root) { this.root.dispose(); this.root = null; }
-        if (this._shadowGen) { this._shadowGen.dispose(); this._shadowGen = null; }
-        if (this._light) { this._light.dispose(); this._light = null; }
-        if (this._ambient) { this._ambient.dispose(); this._ambient = null; }
     }
 }

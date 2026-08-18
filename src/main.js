@@ -147,7 +147,7 @@ async function boot() {
     // procedural figure below, because a failed/missing asset has to be
     // knowable *before* deciding what `characterModel` actually resolves to.
     await loading.phase("loading hero character", 0.70);
-    const ranger = new RangerCharacter(scene);
+    const ranger = new RangerCharacter(scene, sky, shadows, depthPass);
     const rangerLoaded = await ranger.load();
     if (!rangerLoaded) {
         // Boot-time correction, not a user preference change — assigned
@@ -209,6 +209,7 @@ async function boot() {
     figure.update(0);
     figure.sync(rig.camera.position);
     await figure.warmUp();
+    await ranger.warmUp();
     spray.update(0, rig.camera.position);
     await spray.warmUp();
     await wake.warmUp();
@@ -270,12 +271,6 @@ async function boot() {
         // figure has been solved.
         figure.update(dt);
         contact.update(dt);
-        // Follows `character` regardless of which model is currently visible
-        // — cheap, and it means flipping `characterModel` never shows a
-        // stale pose. `sync`/`updateLighting` are no-ops until `ranger.load()`
-        // has actually resolved.
-        ranger.sync(character.position, character.facing);
-        ranger.updateLighting(sky, S.ambientIntensity);
         const tChar = performance.now();
 
         // Player-commanded recenter — set the target before the rig consumes
@@ -308,6 +303,12 @@ async function boot() {
         // After the shadow refit, so the figure's uniforms carry this frame's
         // cascade matrices rather than last frame's.
         figure.sync(rig.camera.position);
+        // Follows `character` regardless of which model is currently visible
+        // — cheap, and it means flipping `characterModel` never shows a
+        // stale pose. `sync` is a no-op until `ranger.load()` has resolved.
+        // Placed after the shadow refit for the same reason as the figure's
+        // own sync above: its uniforms need this frame's cascade matrices.
+        ranger.sync(character.position, character.facing, rig.camera.position);
         // Before the spray: the wake decides where its own lip is, and the
         // grains it sheds have to be in the pool before the pool is uploaded.
         wake.update(dt, rig.camera.position);

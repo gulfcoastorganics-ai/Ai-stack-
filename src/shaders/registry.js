@@ -66,6 +66,11 @@ import wakePrepassVert from "./wakePrepass.vertex.wgsl?raw";
 import wakePrepassFrag from "./wakePrepass.fragment.wgsl?raw";
 import crystalPrepassVert from "./crystalPrepass.vertex.wgsl?raw";
 
+import rangerCharVert from "./rangerChar.vertex.wgsl?raw";
+import rangerCharFrag from "./rangerChar.fragment.wgsl?raw";
+import rangerDepthVert from "./rangerDepth.vertex.wgsl?raw";
+import rangerPrepassVert from "./rangerPrepass.vertex.wgsl?raw";
+
 
 const INCLUDES = {
     snowNoise: noiseLib,
@@ -129,6 +134,11 @@ const SHADERS = {
     wakePrepassVertexShader: wakePrepassVert,
     wakePrepassPixelShader: wakePrepassFrag,
     crystalPrepassVertexShader: crystalPrepassVert,
+
+    rangerCharVertexShader: rangerCharVert,
+    rangerCharPixelShader: rangerCharFrag,
+    rangerDepthVertexShader: rangerDepthVert,
+    rangerPrepassVertexShader: rangerPrepassVert,
 };
 
 let registered = false;
