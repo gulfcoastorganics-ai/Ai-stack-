@@ -202,6 +202,16 @@ export const S = {
     // --------------------------------------------------------------- systems
     showTerrain: true,
     showCharacter: true,
+    /**
+     * Which hero-character representation is visible: the authored Quaternius
+     * Male Ranger glTF, or the original procedural traveler. Both are always
+     * constructed and both keep receiving `CharacterController` state every
+     * frame regardless of this flag — see `main.js` — so flipping it live
+     * never re-triggers a load and never desyncs from gameplay. Defaults to
+     * "ranger"; `main.js` forces this to "procedural" at boot if the Ranger
+     * glTF fails to load, so a broken/missing asset never blanks the screen.
+     */
+    characterModel: "ranger", // "ranger" | "procedural"
     showWake: true,
     showLightShafts: true,
     wireframe: false,
@@ -332,6 +342,7 @@ export const SCHEMA = [
         items: [
             { k: "showTerrain", l: "Terrain", t: "b" },
             { k: "showCharacter", l: "Character", t: "b" },
+            { k: "characterModel", l: "Character model", t: "e", opts: ["ranger", "procedural"] },
             { k: "wireframe", l: "Wireframe", t: "b" },
             { k: "freezeTime", l: "Freeze time", t: "b" },
             { k: "resolutionScale", l: "Resolution", t: "f", min: 0.4, max: 1.25, step: 0.05 },

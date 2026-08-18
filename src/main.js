@@ -22,6 +22,7 @@ import { initInput, pollInput, endFrame, input } from "./core/input.js";
 import { CameraRig } from "./core/camera.js";
 import { CharacterController } from "./character/controller.js";
 import { Character } from "./character/character.js";
+import { RangerCharacter } from "./character/rangerCharacter.js";
 import { SnowContact } from "./character/snowContact.js";
 import { SprayField } from "./vfx/particles.js";
 import { SurfWake } from "./vfx/surfWake.js";
@@ -135,10 +136,36 @@ async function boot() {
     character.position.set(0, 0, 0);
     character.position.y = terrain.heightAt(0, 0);
 
-    // The figure: skeleton, garment simulation, shell fur.
+    // The figure: skeleton, garment simulation, shell fur. Always constructed
+    // and always kept ticking below regardless of `S.characterModel` — see
+    // the visibility block after the Ranger loads for why.
     const figure = new Character(scene, terrain, sky, shadows, character);
-    onChange("showCharacter", (v) => figure.setVisible(v));
     figure.registerPrepass(depthPass);
+
+    // The authored Quaternius Male Ranger — see `rangerCharacter.js` for the
+    // full adapter-architecture note. Loaded here, not warmed up like the
+    // procedural figure below, because a failed/missing asset has to be
+    // knowable *before* deciding what `characterModel` actually resolves to.
+    await loading.phase("loading hero character", 0.70);
+    const ranger = new RangerCharacter(scene);
+    const rangerLoaded = await ranger.load();
+    if (!rangerLoaded) {
+        // Boot-time correction, not a user preference change — assigned
+        // directly rather than through `set()` so it doesn't fire listeners
+        // that haven't been wired up yet (see `applyCharacterVisibility`
+        // below, called once explicitly right after they are).
+        S.characterModel = "procedural";
+    }
+
+    /** Show exactly one of the two character representations at a time. */
+    function applyCharacterVisibility() {
+        const showAny = S.showCharacter;
+        const wantRanger = showAny && S.characterModel === "ranger" && ranger.loaded;
+        figure.setVisible(showAny && !wantRanger);
+        ranger.setVisible(wantRanger);
+    }
+    onChange(["showCharacter", "characterModel"], applyCharacterVisibility);
+    applyCharacterVisibility();
 
     // Airborne snow: footfall kick now, the surf plume and spell spray later.
     const spray = new SprayField(scene, terrain, sky, shadows);
@@ -243,6 +270,12 @@ async function boot() {
         // figure has been solved.
         figure.update(dt);
         contact.update(dt);
+        // Follows `character` regardless of which model is currently visible
+        // — cheap, and it means flipping `characterModel` never shows a
+        // stale pose. `sync`/`updateLighting` are no-ops until `ranger.load()`
+        // has actually resolved.
+        ranger.sync(character.position, character.facing);
+        ranger.updateLighting(sky, S.ambientIntensity);
         const tChar = performance.now();
 
         // Player-commanded recenter — set the target before the rig consumes
@@ -324,7 +357,7 @@ async function boot() {
     setTimeout(() => overlay.resetSpikes(), 800);
 
     globalThis.SANDSTORM = {
-        engine, scene, rig, character, figure, contact, spray, wake, spells,
+        engine, scene, rig, character, figure, ranger, contact, spray, wake, spells,
         overlay, terrain, sky, shadows, post, depthPass,
         S, input, perfStats: stats,
     };
