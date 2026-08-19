@@ -1,7 +1,7 @@
 {
-  "name": "snowflow",
+  "name": "sandstorm-webgpu",
   "version": "1.0.0",
-  "description": "Real-time procedural snow rendering tech demo (Babylon.js / WebGPU)",
+  "description": "Real-time desert action and procedural sand simulation built with Babylon.js, WebGPU, WGSL, and Vite.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,10 +13,11 @@
     "webgpu",
     "babylonjs",
     "wgsl",
-    "snow",
+    "sand",
+    "desert",
     "terrain",
     "procedural",
-    "graphics"
+    "game"
   ],
   "license": "MIT",
   "dependencies": {
