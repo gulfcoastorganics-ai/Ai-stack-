@@ -20,7 +20,7 @@ Development requirements:
 
 - Node.js 22 recommended
 - npm
-- A current WebGPU-capable Chrome, Edge, Firefox, or Safari build for visual/gameplay validation
+- A current WebGPU-capable browser for visual/gameplay validation
 
 ## Install and run
 
@@ -38,13 +38,9 @@ npm test
 npm run build
 ```
 
-GitHub Actions also runs `npm ci`, `npm test`, and `npm run build` for the development branch and pull requests into `main`.
-
-The existing development work has additionally been syntax-checked and served successfully in a headless environment. That environment does not expose WebGPU or a real keyboard/mouse gameplay loop, so release promotion still requires one final hands-on WebGPU pass for movement feel, camera behavior, shader compilation, visual stability, and the five abilities.
+GitHub Actions runs `npm ci`, `npm test`, and `npm run build` for `main`, the development branch, and pull requests into `main`. A separate Pages workflow builds and deploys `main` as the public browser build.
 
 ## Architecture
-
-The project keeps the original GPU-oriented simulation structure while changing the material and gameplay semantics to sand:
 
 - `src/terrain/` — heightfield, terrain, deformation, contact state
 - `src/shaders/` — WGSL terrain, wake, deformation, particle, and shared shading programs
@@ -55,13 +51,9 @@ The project keeps the original GPU-oriented simulation structure while changing 
 
 ## Release status
 
-This branch is a launch candidate, not yet a verified stable release. Automated build/test success is necessary but not sufficient because the application depends on real WebGPU rendering and input behavior. Before merging to `main`, complete a hands-on browser pass and confirm:
+The repository is configured as a distributable WebGPU browser release: automated tests and production builds are enforced in CI, and pushes to `main` are deployed through GitHub Pages. Because the renderer intentionally requires WebGPU, target-device acceptance remains part of release QA. On representative launch hardware confirm terrain/WGSL rendering, movement and camera feel, all five abilities, deformation/VFX stability, and acceptable frame pacing.
 
-- terrain and all edited WGSL programs compile without WebGPU validation errors;
-- movement, jump, dash, Sand Step, Dune Surf, and camera controls feel correct;
-- all five abilities target, animate, and resolve correctly;
-- dune deformation, wake, loose-sand migration, ambient drift, and landing effects remain visually stable;
-- performance is acceptable on the intended launch hardware.
+Browsers without WebGPU receive the application's explicit unsupported-GPU state rather than a silent blank screen.
 
 ## License
 
